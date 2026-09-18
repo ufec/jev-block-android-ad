@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      权限清单。分两类：
+
+      1. 通用能力 —— 网络与包可见性。QUERY_ALL_PACKAGES 是 Android 11+ 的包可见性限制：
+         不声明的话 PackageManager 查不到其他 App，就解析不出 App 显示名，
+         界面上只能退化显示包名。
+      2. 自身通知 —— Android 13+ 起发通知需要运行时授权。当前观察期还没发通知，
+         但回收站提醒会用到，提前声明避免以后忘了。
+
+      短信相关权限（READ_SMS / RECEIVE_SMS）由 :feature:sms 的清单声明，
+      通知监听服务由 :feature:notification 的清单声明 —— 各自靠近使用它们的代码，
+      清单合并后进入本 App。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <application
+        android:name=".JevNoiseGateApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.JevNoiseGate">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.JevNoiseGate">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

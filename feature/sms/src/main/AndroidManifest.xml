@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      短信采集（A 档）所需的权限。
+
+      A 档的定义：只读取短信正文，**不申请成为默认短信 App**。
+      代价是无法删除或拦截短信本体，只能取消它产生的通知；
+      收益是不必重做一个完整的短信应用，也不必处理 MMS / RCS 的兼容包袱。
+
+      READ_SMS 不是硬依赖 —— 拿不到时短信通知仍会被通知采集端捕获，
+      只是正文要靠解析通知里的文本，覆盖率下降但功能不塌。
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <application>
+
+        <!--
+          SMS_RECEIVED 是受保护广播（只有系统能发），因此 exported=true 是安全的。
+        -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="0">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

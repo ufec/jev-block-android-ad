@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      与 KernelSU 的做法一致：**不覆盖 windowBackground**，只给 light/dark 一对父主题，
+      由平台选择窗口背景。
+
+      Phase 0 时这里写过 `@android:color/white` 且没有 values-night 变体 ——
+      暗色下窗口背景是纯白，转场或启动瞬间露出窗口就会闪一下。这是实打实的 bug。
+    -->
+    <style name="Theme.JevNoiseGate" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

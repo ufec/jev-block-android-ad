@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!--
+          通知监听服务。
+
+          注意这不是一条 <uses-permission> —— 它是一个「由系统绑定的服务」，
+          靠 android:permission 要求绑定方持有 BIND_NOTIFICATION_LISTENER_SERVICE，
+          再由用户在「设置 → 通知 → 通知使用权」里手动勾选本 App。
+
+          因此：未授权时本服务根本不会被创建（onCreate 都不会调用），
+          也无法用代码申请或自动开启，只能在界面上引导用户跳转过去。
+        -->
+        <service
+            android:name=".NoiseGateNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

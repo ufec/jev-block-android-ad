@@ -1,0 +1,75 @@
+归属说明
+========
+
+本模块是 **TypeSafe 官方 JavaScript SDK 的 Kotlin 移植版本**。
+
+上游作品
+--------
+
+    名称：  @typesafe-ai/sdk
+    版本：  0.6.0
+    作者：  evinism
+    仓库：  https://github.com/typesafe-ai/typesafe-sdk-js
+    许可：  MIT
+
+
+许可与合规
+----------
+
+上游以 MIT 许可发布。MIT 允许使用、复制、修改、合并、发布、分发、再许可
+及/或销售本软件的副本，因此本 Kotlin 移植与再发布是合规的。
+
+MIT 的**唯一条件**是：上述版权声明与本许可声明必须包含在本软件的所有副本
+或实质部分中。
+
+因此本目录下的 `LICENSE` 文件是**合规要件，不是形式**：
+它保留了上游的 `Copyright (c) 2026 TypeSafe`。
+**请勿删除、替换或改写成其他协议。**
+
+
+移植范围
+--------
+
+从上游 1:1 对应过来的部分：
+
+- `TypeSafeClient` —— 请求构造、响应解析、状态码到异常类型的映射
+- `TypeSafeConfig` —— 配置项与构造期校验
+- `Types` —— 请求与响应的数据结构（含 `ModelCard`）
+- `RetryPolicy` / 重试与退避逻辑
+- `TypeSafeException` 及其子类型
+- 日志分级与敏感请求头脱敏（`authorization` / `proxy-authorization` / `x-api-key`）
+
+Kotlin / Android 侧新增的部分（上游没有对应物）：
+
+- `ProxySpec` —— HTTP 与 SOCKS5 代理。Ktor 的 `ProxyConfig` 不带凭据
+  （在 JVM 上它就是 `java.net.Proxy`），因此代理认证下沉到 OkHttp 的
+  `proxyAuthenticator` 处理 407 挑战
+- `expect/actual` 的 `defaultHttpClient` —— HTTP 引擎是平台相关的
+- `ModelCard.releaseDate` 等字段采用 Kotlin 命名规范，与上游的
+  `release_date` 一一对应
+
+移植时**刻意保留**的行为：所有失败路径的语义与上游一致，
+包括状态码到异常类型的映射表。改动这些会让错误处理在两端产生分歧，
+反而失去"移植"的意义。
+
+
+与具体应用的解耦
+----------------
+
+本模块**不依赖** JevNoiseGate 应用的任何代码，只依赖以下公共库：
+
+    kotlinx-serialization-json
+    kotlinx-coroutines-core
+    ktor-client-core
+    ktor-client-okhttp
+
+因此它可以独立发布与复用。
+
+默认的 `baseUrl`（`https://api.typesafe.ai`）来自上游，是该服务的官方端点。
+
+
+联系方式
+--------
+
+上游问题请反馈至 https://github.com/typesafe-ai/typesafe-sdk-js
+本移植的问题请反馈至本仓库。
