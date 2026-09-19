@@ -516,6 +516,13 @@ val MainTabs: List<TabItem> = listOf(
  * 容器与指示线都透明，让输入框直接"长"在分段卡片上，而不是再嵌一个自己的边框 ——
  * 否则会出现两层容器叠在一起的割裂感。文字色不覆盖，交给主题决定：
  * 硬编码黑白会在自定义主题色下失去对比度。
+ *
+ * [modifier] 作用在**容器**（Surface）上而不是内部输入框上。这是为了能把它放进 `Row`
+ * 并用 `weight` 分栏（代理页的主机 + 端口就是一行两栏）；作用在输入框上时，
+ * 容器仍会撑满整行，分栏无从谈起。
+ *
+ * [supportingText] 传了就在输入框下方常显一行说明 —— 错误文案走这个口子，
+ * 因为它会改变该字段的高度，而 `Row` 里另一个字段不受影响（配合 `Alignment.Top`）。
  */
 @Composable
 fun SegmentedField(
@@ -528,19 +535,23 @@ fun SegmentedField(
     keyboardType: androidx.compose.ui.text.input.KeyboardType =
         androidx.compose.ui.text.input.KeyboardType.Text,
     trailingIcon: (@Composable () -> Unit)? = null,
+    isError: Boolean = false,
+    supportingText: String? = null,
 ) {
-    SegmentedItemContainer {
+    SegmentedItemContainer(modifier = modifier) {
         androidx.compose.material3.TextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             label = { Text(label) },
             singleLine = true,
+            isError = isError,
             visualTransformation = visualTransformation,
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = keyboardType,
             ),
             trailingIcon = trailingIcon,
+            supportingText = supportingText?.let { text -> { Text(text) } },
             colors = transparentFieldColors(),
         )
     }
@@ -556,6 +567,12 @@ internal fun transparentFieldColors() = androidx.compose.material3.TextFieldDefa
     focusedIndicatorColor = Color.Transparent,
     unfocusedIndicatorColor = Color.Transparent,
     disabledIndicatorColor = Color.Transparent,
+    // 指示线一律透明是刻意的：这个组件的形态是"没有边框的输入框"，
+    // 出错时也不该凭空长出一条下划线。错误靠文字颜色表达。
+    errorIndicatorColor = Color.Transparent,
+    errorTextColor = MaterialTheme.colorScheme.error,
+    errorLabelColor = MaterialTheme.colorScheme.error,
+    errorSupportingTextColor = MaterialTheme.colorScheme.error,
 )
 
 /** 搜索框。 */

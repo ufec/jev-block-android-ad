@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.ethanxu.jevnoisegate.app.SettingsViewModel
+import me.ethanxu.jevnoisegate.app.proxyStatus
 import me.ethanxu.jevnoisegate.ui.component.SegmentedArrowItem
 import me.ethanxu.jevnoisegate.ui.component.SegmentedColumn
 import me.ethanxu.jevnoisegate.ui.navigation.LocalNavigator
@@ -77,7 +78,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 item {
                     SegmentedArrowItem(
                         title = "网络代理",
-                        summary = proxySummary(prefs),
+                        // 摘要与警告色都按「已配置但没生效」来判定 —— 那才是需要用户注意的状态。
+                        summary = proxyStatus(prefs).summary,
+                        summaryIsWarning = proxyStatus(prefs).isWarning,
                         onClick = { navigator.push(Route.ProxySettings) },
                     )
                 }
@@ -105,12 +108,6 @@ private fun userRulesSummary(prefs: AppPreferences): String {
     } else {
         "优先放行 $allow 条 · 优先拦截 $block 条"
     }
-}
-
-private fun proxySummary(prefs: AppPreferences): String = when {
-    prefs.proxyType == AppPreferences.PROXY_NONE -> "直连"
-    !prefs.isProxyConfigured -> "未配置完整 · 当前按直连处理"
-    else -> "${prefs.proxyType.uppercase()} · ${prefs.proxyHost}:${prefs.proxyPort}"
 }
 
 internal fun ColorMode.displayName(): String = when (this) {    ColorMode.SYSTEM -> "跟随系统"

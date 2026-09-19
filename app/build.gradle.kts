@@ -91,6 +91,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    // 代理探测直接用 OkHttp，不经 SDK —— 理由见 ProxyProbe.kt（SDK 客户端带重试，
+    // 会把"代理不通"拖成三十秒才报错；且它同时验证 API Key，两件事会混在一起）。
+    implementation(libs.okhttp)
+
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

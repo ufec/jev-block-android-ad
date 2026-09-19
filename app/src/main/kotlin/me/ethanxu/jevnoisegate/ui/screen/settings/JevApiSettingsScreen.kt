@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.FilterChip
 import me.ethanxu.jevnoisegate.app.SettingsViewModel
 import me.ethanxu.jevnoisegate.ui.component.AppIcons
+import me.ethanxu.jevnoisegate.app.proxyStatus
 import me.ethanxu.jevnoisegate.core.data.settings.AppPreferences
 import me.ethanxu.jevnoisegate.ui.component.SegmentedColumn
 import me.ethanxu.jevnoisegate.ui.component.SegmentedField
@@ -195,12 +196,11 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             Text("出网链路", style = MaterialTheme.typography.bodyLarge)
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = prefs.proxyChainSummary(),
+                                text = proxyStatus(prefs).detail,
                                 style = MaterialTheme.typography.bodySmall,
-                                // 半配置是一条容易被忽略的警告：用户以为在用代理，实际是直连。
-                                color = if (prefs.proxyType != AppPreferences.PROXY_NONE &&
-                                    !prefs.isProxyConfigured
-                                ) {
+                                // 警告场景变多了：配了但没验证过也用警告色 ——
+                                // 用户以为在用代理、实际是直连，这是最容易被忽略的一种。
+                                color = if (proxyStatus(prefs).isWarning) {
                                     MaterialTheme.colorScheme.error
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -223,15 +223,12 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Button(
                                 onClick = {
-                                    viewModel.testConnection(
+                                    // 代理不用传：本页的测试取「生效中」的代理配置，
+                                    // 也就是真实请求会走的那一份。代理的表单值要去
+                                    // 「网络代理」页测，两页各答一个问题。
+                                    viewModel.testApiConnection(
                                         apiKey = apiKey,
                                         baseUrl = baseUrl,
-                                        // 代理配置在「网络代理」页维护，这里用已保存的值。
-                                        proxyType = prefs.proxyType,
-                                        proxyHost = prefs.proxyHost,
-                                        proxyPort = prefs.proxyPort,
-                                        proxyUsername = prefs.proxyUsername,
-                                        proxyPassword = prefs.proxyPassword,
                                     )
                                 },
                                 enabled = !test.running,
@@ -256,9 +253,13 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 item {
                     SegmentedItemContainer {
                         Text(
-                            text = "这一步用表单里的当前值临时建立连接，因此**测的是你刚填的配置**，" +
-                                "不需要先保存。请求的是 GET /v1/models —— 它同时也是模型列表接口，" +
-                                "所以一次请求既验证了连通性（含代理），又把可选模型取回来。\n\n" +
+                            text = "这一步用表单里的 API Key 与 Base URL 临时建立连接，" +
+                                "因此测的是你刚填的凭据，不需要先保存。\n\n" +
+                                "代理不取表单值，取的是「生效中」的那一份 —— 也就是真实判断会走的那条路。" +
+                                "所以这里连接失败时，先看上面的出网链路：代理若还没验证，实际走的是直连。" +
+                                "代理的验证在「网络代理」页完成。\n\n" +
+                                "请求的是 GET /v1/models —— 它同时也是模型列表接口，" +
+                                "所以一次请求既验证了连通性，又把可选模型取回来。\n\n" +
                                 "修改配置后需要重启应用才会对实际判断生效。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -287,25 +288,6 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 }
             }
         }
-    }
-}
-
-/**
- * 当前出网链路的一句话描述。
- *
- * 存在的意义：代理配在独立页面，本页又依赖它 —— 连接失败时用户需要立刻看到
- * "到底走没走代理"，否则会跑去反复改 Key 和 Base URL。
- */
-private fun AppPreferences.proxyChainSummary(): String = when {
-    proxyType == AppPreferences.PROXY_NONE -> "直连，未经代理"
-    !isProxyConfigured -> "代理未配置完整（缺主机或端口），当前按直连处理"
-    else -> buildString {
-        append(proxyType.uppercase())
-        append(' ')
-        append(proxyHost)
-        append(':')
-        append(proxyPort)
-        append(if (proxyUsername.isNotBlank()) " · 含认证" else " · 无认证")
     }
 }
 

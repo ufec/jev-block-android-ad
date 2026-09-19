@@ -67,11 +67,27 @@ interface SettingsRepository {
 
     // --- 网络代理 ---
 
-    suspend fun setProxyType(value: String)
-    suspend fun setProxyHost(value: String)
-    suspend fun setProxyPort(value: Int)
-    suspend fun setProxyUsername(value: String)
-    suspend fun setProxyPassword(value: String)
+    /**
+     * 保存一组代理配置，并把它记为「已通过测试」。
+     *
+     * 这是**唯一**的代理写入入口，而且只应该在测试通过之后调用 —— 界面上的改动在保存前
+     * 只留在表单里。于是"当前生效的代理必然是测过的"由写入路径本身保证，
+     * 而不是靠每个调用点自觉。
+     *
+     * 五个字段加指纹**一次写完**：分开写会出现"主机已更新、端口还是旧的"这种中间态，
+     * 而一旦有人拿这个中间态去建客户端，就得到一个半配置的代理。
+     *
+     * 指纹由这里按**实际存下来的那组值**计算，因此必然与 [AppPreferences.isProxyVerified]
+     * 的算法一致。让调用方算好再传进来，只要有一处归一化方式不同（比如谁 trim 了谁没 trim），
+     * 验证就会永远对不上 —— 那个 bug 已经踩过一次。
+     */
+    suspend fun saveProxyConfig(
+        type: String,
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+    )
 
     // --- 用户偏好规则 ---
 
@@ -154,20 +170,35 @@ internal class DataStoreSettingsRepository(
         mutate({ it.copy(logLevel = value) }) { it[Keys.LOG_LEVEL] = value }
     }
 
-    override suspend fun setProxyType(value: String) =
-        mutate({ it.copy(proxyType = value) }) { it[Keys.PROXY_TYPE] = value }
-
-    override suspend fun setProxyHost(value: String) =
-        mutate({ it.copy(proxyHost = value) }) { it[Keys.PROXY_HOST] = value }
-
-    override suspend fun setProxyPort(value: Int) =
-        mutate({ it.copy(proxyPort = value) }) { it[Keys.PROXY_PORT] = value }
-
-    override suspend fun setProxyUsername(value: String) =
-        mutate({ it.copy(proxyUsername = value) }) { it[Keys.PROXY_USERNAME] = value }
-
-    override suspend fun setProxyPassword(value: String) =
-        mutate({ it.copy(proxyPassword = value) }) { it[Keys.PROXY_PASSWORD] = value }
+    override suspend fun saveProxyConfig(
+        type: String,
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+    ) {
+        val fingerprint = proxyFingerprint(type, host, port, username, password)
+        mutate(
+            updateMemory = {
+                it.copy(
+                    proxyType = type,
+                    proxyHost = host,
+                    proxyPort = port,
+                    proxyUsername = username,
+                    proxyPassword = password,
+                    proxyVerifiedFingerprint = fingerprint,
+                )
+            },
+            updateDisk = {
+                it[Keys.PROXY_TYPE] = type
+                it[Keys.PROXY_HOST] = host
+                it[Keys.PROXY_PORT] = port
+                it[Keys.PROXY_USERNAME] = username
+                it[Keys.PROXY_PASSWORD] = password
+                it[Keys.PROXY_VERIFIED_FINGERPRINT] = fingerprint
+            },
+        )
+    }
 
     override suspend fun setPreferAllowRules(value: List<String>) =
         mutate({ it.copy(preferAllowRules = value) }) { it[Keys.PREFER_ALLOW] = value.joinToString("\n") }
@@ -211,6 +242,7 @@ internal class DataStoreSettingsRepository(
         val PROXY_PORT = intPreferencesKey("proxy_port")
         val PROXY_USERNAME = stringPreferencesKey("proxy_username")
         val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
+        val PROXY_VERIFIED_FINGERPRINT = stringPreferencesKey("proxy_verified_fingerprint")
         // 规则是自由文本，可能含任意字符；用换行分隔成单条，
         // 而不是 stringSet —— 后者会丢失顺序，而顺序就是用户心里的优先级。
         val PREFER_ALLOW = stringPreferencesKey("prefer_allow_rules")
@@ -237,6 +269,8 @@ private fun Preferences.toAppPreferences(): AppPreferences {
         proxyPort = this[intPreferencesKey("proxy_port")] ?: defaults.proxyPort,
         proxyUsername = this[stringPreferencesKey("proxy_username")] ?: defaults.proxyUsername,
         proxyPassword = this[stringPreferencesKey("proxy_password")] ?: defaults.proxyPassword,
+        proxyVerifiedFingerprint = this[stringPreferencesKey("proxy_verified_fingerprint")]
+            ?: defaults.proxyVerifiedFingerprint,
         preferAllowRules = parseRules(this[stringPreferencesKey("prefer_allow_rules")]),
         preferBlockRules = parseRules(this[stringPreferencesKey("prefer_block_rules")]),
         smsSenderBlacklist = parseRules(this[stringPreferencesKey("sms_sender_blacklist")]),

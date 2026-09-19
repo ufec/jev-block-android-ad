@@ -21,6 +21,11 @@ ktor = "3.6.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 
+# OkHttp。只给「网络代理」页的探测用，不参与业务请求（那条路走 SDK 的 Ktor 栈）。
+# 版本必须与 SDK 内部 ktor-client-okhttp:3.6.0 已经带进来的 okhttp-jvm 一致，
+# 否则同一个 classpath 上会同时出现 4.x 与 5.x，二者的 API 并不完全兼容。
+okhttp = "5.5.0"
+
 # TypeSafe Kotlin SDK。版本号就是上游仓库的 git tag，由 JitPack 解析。
 # v0.2.0 给 SDK 加了 JVM 目标（应用用不到），并补上了可运行的 examples。
 typesafeSdk = "v0.2.0"
@@ -79,6 +84,9 @@ ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.r
 ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
+
+# --- OkHttp（代理探测，见 ProxyProbe.kt）---
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 
 # --- Coroutines / Serialization ---
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

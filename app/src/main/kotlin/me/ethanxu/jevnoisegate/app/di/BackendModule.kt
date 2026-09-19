@@ -7,7 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import me.ethanxu.jevnoisegate.app.BuildConfig
-import me.ethanxu.jevnoisegate.app.proxySpecOrNull
+import me.ethanxu.jevnoisegate.app.verifiedProxySpecOrNull
 import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.TypeSafeBackend
 import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
@@ -40,7 +40,10 @@ object BackendModule {
                 timeoutMs = prefs.timeoutMs,
                 // SDK 的默认值是中性占位（commonMain 读不到平台版本号），这里补上真实信息。
                 runtimeDescriptor = "android/${Build.VERSION.RELEASE}",
-                proxy = proxySpecOrNull(prefs.proxyType, prefs.proxyHost, prefs.proxyPort),
+                // 只装配**已验证通过**的代理。未验证就退回直连 —— 一个没测通的代理
+                // 比直连更糟：请求会一路超时，而日志里看不出是因为代理。
+                // 传整个 prefs 而不是拆开的几项，凭据因此不会再被漏掉。
+                proxy = verifiedProxySpecOrNull(prefs),
             ),
         )
     }

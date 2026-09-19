@@ -1,5 +1,7 @@
 package me.ethanxu.jevnoisegate.core.data.settings
 
+import java.security.MessageDigest
+
 /**
  * 全部用户设置。
  *
@@ -55,6 +57,15 @@ data class AppPreferences(
      */
     val proxyPassword: String = "",
 
+    /**
+     * 已验证通过的那组代理配置的指纹；空表示从未验证通过。
+     *
+     * 存的是[proxyFingerprint]的结果而不是一个布尔量，是为了**自失效**：
+     * 只要类型/主机/端口/用户名/密码任意一项变了，指纹就对不上，验证自动作废。
+     * 用布尔量的话，每个 setter 都必须记得去清标记，漏掉一个就是一个静默的漏洞。
+     */
+    val proxyVerifiedFingerprint: String = "",
+
     // --- 用户偏好规则 ---
     /**
      * 用户声明的"应当放行"偏好，每条一句话。
@@ -109,6 +120,21 @@ data class AppPreferences(
     val isProxyConfigured: Boolean
         get() = proxyType != PROXY_NONE && proxyHost.isNotBlank() && proxyPort in 1..65535
 
+    /**
+     * 代理是否**已被验证通过**，即当前这组配置是否就是测试通过的那一组。
+     *
+     * 这是「未验证的代理不生效」那条规则的全部依据：只有它为真，
+     * 构造客户端时才会把代理装上（见 `verifiedProxySpecOrNull`）。
+     *
+     * 在构造时算一次而不是写成 `get()` —— 它会被界面每次重组读到，
+     * 而指纹是一次 SHA-256，没必要反复算。
+     */
+    val isProxyVerified: Boolean =
+        isProxyConfigured &&
+            proxyVerifiedFingerprint.isNotEmpty() &&
+            proxyVerifiedFingerprint ==
+            proxyFingerprint(proxyType, proxyHost, proxyPort, proxyUsername, proxyPassword)
+
     companion object {
         const val DEFAULT_UI_MODE: String = "miuix"
         const val DEFAULT_COLOR_MODE: Int = 0
@@ -133,3 +159,38 @@ data class AppPreferences(
         val PROXY_TYPES: List<String> = listOf(PROXY_NONE, PROXY_HTTP, PROXY_HTTPS, PROXY_SOCKS5)
     }
 }
+
+/**
+ * 一组代理配置的指纹。
+ *
+ * 用来把「已验证」这件事绑定到**具体的那一组值**上：任何一项变了指纹就变，
+ * [AppPreferences.isProxyVerified] 随之变假，验证自动作废。
+ *
+ * **密码纳入指纹**，所以只改密码同样要重测。这不新增暴露面：密码本就以明文
+ * 存在同一个 DataStore 文件里（见 [AppPreferences.proxyPassword]），
+ * 这里多出来的只是一个摘要。
+ *
+ * 取 SHA-256 的前 8 字节（16 位十六进制）即可。这不是防碰撞的场景，
+ * 要的只是一个对配置敏感、又短到能塞进偏好文件的标识。
+ */
+fun proxyFingerprint(
+    type: String,
+    host: String,
+    port: Int,
+    username: String,
+    password: String,
+): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest("$type|$host|$port|$username|$password".toByteArray(Charsets.UTF_8))
+    // 逐字节取半字节拼十六进制。不用 String.format("%02x") —— Byte 是负数时
+    // 格式化结果依赖 JDK 对窄类型符号扩展的处理，不值得去赌。
+    return buildString(16) {
+        for (i in 0 until 8) {
+            val byte = digest[i].toInt() and 0xFF
+            append(HEX_DIGITS[byte ushr 4])
+            append(HEX_DIGITS[byte and 0x0F])
+        }
+    }
+}
+
+private const val HEX_DIGITS: String = "0123456789abcdef"
