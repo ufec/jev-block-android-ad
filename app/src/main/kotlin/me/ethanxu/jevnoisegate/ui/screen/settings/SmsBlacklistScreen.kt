@@ -69,7 +69,7 @@ fun SmsBlacklistScreen(viewModel: SettingsViewModel = viewModel()) {
                     item {
                         SegmentedItemContainer {
                             Text(
-                                text = "命中黑名单的短信**不会调用模型**，直接拦截 —— " +
+                                text = "命中黑名单的短信不会调用模型，直接拦截 —— " +
                                     "这是硬规则，比「用户偏好规则」可靠。\n\n" +
                                     "拦截的效果是撤销这条短信的通知，让它不弹出来。" +
                                     "短信本体仍保留在收件箱里 —— 只有系统默认短信应用才有权限删除短信，" +
