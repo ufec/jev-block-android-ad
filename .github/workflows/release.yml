@@ -33,8 +33,12 @@ jobs:
       # exactly rather than taking the newest installed one, so installing 37.0.0
       # would only make it fetch 36.0.0 again on its own.
       BUILD_TOOLS_VERSION: '36.0.0'
-      KEYSTORE_FILE: ${{ runner.temp }}/release.p12
       ASSET_PREFIX: JevNoiseGate-${{ github.ref_name }}
+      # The keystore path is NOT defined here. A job-level env block cannot use the
+      # `runner` context -- it has no value until a runner has been assigned, and
+      # GitHub rejects the whole file over it ("Unrecognized named-value: 'runner'"),
+      # silently dropping the workflow's name and its `on:` filters along with it.
+      # Shells get RUNNER_TEMP for free, so the path is built from that instead.
 
     steps:
       - uses: actions/checkout@v5
@@ -150,8 +154,8 @@ jobs:
             echo "::error::secret RELEASE_KEYSTORE_BASE64 is not set"
             exit 1
           fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
-          chmod 600 "$KEYSTORE_FILE"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          chmod 600 "$RUNNER_TEMP/release.p12"
 
       # Signing is a step of the release, not part of the build configuration, so
       # app/build.gradle.kts is deliberately left without a signingConfig -- the same
@@ -191,7 +195,7 @@ jobs:
           # process list or the logs. PKCS12 forces the key password to equal the
           # store password, which is why one secret covers both.
           "${build_tools}/apksigner" sign \
-            --ks "$KEYSTORE_FILE" \
+            --ks "$RUNNER_TEMP/release.p12" \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KEYSTORE_PASSWORD \
             --key-pass env:KEYSTORE_PASSWORD \
@@ -200,7 +204,7 @@ jobs:
 
           "${build_tools}/apksigner" verify --verbose --print-certs "dist/${ASSET_PREFIX}.apk"
           "${build_tools}/zipalign" -c 4 "dist/${ASSET_PREFIX}.apk"
-          rm -f "$KEYSTORE_FILE" "$RUNNER_TEMP/aligned.apk"
+          rm -f "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/aligned.apk"
 
       # proguard-rules.pro:35 requires mapping.txt to be archived with every release:
       # R8 output has no line numbers in its stack traces, so retrace against this file
