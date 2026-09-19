@@ -147,14 +147,15 @@ core:common       cross-cutting utilities (logging, clock, ...)
 feature:notification   notification listener
 feature:sms            SMS receiver
 
-sdk:typesafe      Kotlin client for the TypeSafe API
 app               Compose UI
 ```
 
-`sdk:typesafe` is a Kotlin port of
-[`@typesafe-ai/sdk@0.6.0`](https://github.com/typesafe-ai/typesafe-sdk-js)
-(MIT). See that module's `LICENSE` and `NOTICE` — they are the attribution
-required by the upstream licence, not decoration.
+The TypeSafe client is **not** a module in this repository. It is a Kotlin port
+of [`@typesafe-ai/sdk@0.6.0`](https://github.com/typesafe-ai/typesafe-sdk-js)
+(MIT) that lives in its own repository, `ufec/typesafe-sdk-kotlin`, and is
+consumed as an ordinary dependency via JitPack. Its `LICENSE` and `NOTICE` are
+the attribution required by the upstream licence, and they are preserved there
+rather than here.
 
 ---
 
@@ -231,5 +232,6 @@ rather than a production product.
 
 The application is released under the MIT Licence — see `LICENSE`.
 
-`sdk/typesafe` is a port of MIT-licensed upstream work and carries its own
-`LICENSE` and `NOTICE`. Both must be preserved.
+The TypeSafe client is a port of MIT-licensed upstream work. It is not part of
+this repository: it lives in `ufec/typesafe-sdk-kotlin` and carries its own
+`LICENSE` and `NOTICE` there. Both must be preserved if you redistribute it.
