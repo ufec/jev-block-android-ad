@@ -22,9 +22,14 @@ import androidx.compose.foundation.layout.height
 import me.ethanxu.jevnoisegate.ui.navigation.LocalNavigator
 import me.ethanxu.jevnoisegate.ui.navigation.Route
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -170,12 +175,6 @@ private fun LogEntryCard(onClick: () -> Unit) {
 }
 
 /**
- * 自测：自发一条通知，验证整条链路。
- *
- * 两个样张缺一不可 —— 只验证"能拦广告"是不够的，
- * 还得确认没有误拦验证码，那才是这个应用最不能犯的错。
- */
-/**
  * 开发者模式开关。
  *
  * 开启后同时做两件事：诊断页出现「自测」工具；本应用自己的通知按普通通知处理。
@@ -202,9 +201,23 @@ private fun DeveloperModeCard(checked: Boolean, onCheckedChange: (Boolean) -> Un
     }
 }
 
+/**
+ * 自测：发一条通知走完整链路。
+ *
+ * 内置样张覆盖两条已知路径，缺一不可 —— 只验证"能拦广告"是不够的，
+ * 还得确认没有误拦验证码，那才是这个应用最不能犯的错。
+ *
+ * 自定义输入补的是样张覆盖不到的那一段：真实误判长什么样只有用户手里有。
+ * 调提示词、改闸门阈值、收到一条判错的通知时，把它原样粘进来就能复现。
+ */
 @Composable
 private fun SelfTestCard() {
     val context = LocalContext.current
+    // 卡片处在 LazyColumn 里，滚出屏幕就会被回收 —— 用 saveable 记住，
+    // 否则粘贴到一半去翻上面对照，回来就空了。
+    var title by rememberSaveable { mutableStateOf("") }
+    var body by rememberSaveable { mutableStateOf("") }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("自测", style = MaterialTheme.typography.titleMedium)
@@ -216,15 +229,49 @@ private fun SelfTestCard() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("标题（可留空）") },
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = body,
+                onValueChange = { body = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("正文") },
+                placeholder = { Text("把收到的那条原样粘进来") },
+                minLines = 3,
+                maxLines = 6,
+            )
+            Spacer(Modifier.height(12.dp))
+            // 正文是判定与指纹的唯一依据，空正文发出去只会污染统计。
+            Button(
+                onClick = { TestNotificationSender.send(context, title, body) },
+                enabled = body.isNotBlank(),
+            ) {
+                Text("发送自定义通知")
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "内置样张",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
+                OutlinedButton(
                     onClick = {
                         TestNotificationSender.send(context, TestNotificationSender.Sample.AD)
                     },
                 ) {
                     Text("广告样张")
                 }
-                Button(
+                OutlinedButton(
                     onClick = {
                         TestNotificationSender.send(context, TestNotificationSender.Sample.OTP)
                     },
@@ -232,9 +279,10 @@ private fun SelfTestCard() {
                     Text("验证码样张")
                 }
             }
+
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "提示：需先配好 API Key，否则判断会降级放行，两个样张都不会被拦。",
+                text = "提示：需先配好 API Key，否则判断会降级放行，样张与自定义内容都不会被拦。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )
