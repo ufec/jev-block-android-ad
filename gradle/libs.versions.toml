@@ -21,6 +21,9 @@ ktor = "3.6.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 
+# TypeSafe Kotlin SDK。版本号就是上游仓库的 git tag，由 JitPack 解析。
+typesafeSdk = "v0.1.0"
+
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 
@@ -63,6 +66,11 @@ androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", vers
 # --- Hilt ---
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
+
+# --- TypeSafe SDK（独立仓库，经 JitPack 分发）---
+# 坐标形式是 com.github.<用户>.<仓库>:<模块>，这是 JitPack 对多模块工程的约定。
+# 只声明根模块：android 变体由 Gradle module metadata 透传到 ...-android。
+typesafe-sdk = { module = "com.github.ufec.typesafe-sdk-kotlin:typesafe-sdk-kotlin", version.ref = "typesafeSdk" }
 
 # --- Ktor (TypeSafe SDK HTTP 层) ---
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }

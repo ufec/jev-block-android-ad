@@ -12,10 +12,9 @@ import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewModelScope
 import me.ethanxu.jevnoisegate.core.data.settings.AppPreferences
 import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
-import me.ethanxu.jevnoisegate.sdk.typesafe.ModelCard
-import me.ethanxu.jevnoisegate.sdk.typesafe.ProxySpec
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeClient
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeConfig
+import me.ethanxu.typesafe.sdk.ModelCard
+import me.ethanxu.typesafe.sdk.TypeSafeClient
+import me.ethanxu.typesafe.sdk.TypeSafeConfig
 
 /**
  * 连接测试的结果。
@@ -121,7 +120,7 @@ class SettingsViewModel @Inject constructor(
                             apiKey = apiKey,
                             baseUrl = baseUrl,
                             timeoutMs = repository.preferences.value.timeoutMs,
-                            proxy = ProxySpec.fromSettings(
+                            proxy = proxySpecOrNull(
                                 type = proxyType,
                                 host = proxyHost,
                                 port = proxyPort,

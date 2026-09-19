@@ -7,12 +7,12 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import me.ethanxu.jevnoisegate.app.BuildConfig
+import me.ethanxu.jevnoisegate.app.proxySpecOrNull
 import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.TypeSafeBackend
 import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
-import me.ethanxu.jevnoisegate.sdk.typesafe.ProxySpec
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeClient
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeConfig
+import me.ethanxu.typesafe.sdk.TypeSafeClient
+import me.ethanxu.typesafe.sdk.TypeSafeConfig
 
 /**
  * 判断后端的装配。
@@ -40,7 +40,7 @@ object BackendModule {
                 timeoutMs = prefs.timeoutMs,
                 // SDK 的默认值是中性占位（commonMain 读不到平台版本号），这里补上真实信息。
                 runtimeDescriptor = "android/${Build.VERSION.RELEASE}",
-                proxy = ProxySpec.fromSettings(prefs.proxyType, prefs.proxyHost, prefs.proxyPort),
+                proxy = proxySpecOrNull(prefs.proxyType, prefs.proxyHost, prefs.proxyPort),
             ),
         )
     }

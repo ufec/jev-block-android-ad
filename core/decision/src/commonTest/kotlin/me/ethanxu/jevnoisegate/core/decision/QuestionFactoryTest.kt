@@ -2,7 +2,7 @@ package me.ethanxu.jevnoisegate.core.decision
 
 import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.model.CategoryConfig
-import me.ethanxu.jevnoisegate.sdk.typesafe.ChoiceQuestion
+import me.ethanxu.typesafe.sdk.ChoiceQuestion
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

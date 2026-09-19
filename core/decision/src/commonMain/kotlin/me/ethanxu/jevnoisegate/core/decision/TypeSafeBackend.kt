@@ -1,15 +1,15 @@
 package me.ethanxu.jevnoisegate.core.decision
 
 import me.ethanxu.jevnoisegate.core.model.FailureReason
-import me.ethanxu.jevnoisegate.sdk.typesafe.APIConnectionException
-import me.ethanxu.jevnoisegate.sdk.typesafe.APITimeoutException
-import me.ethanxu.jevnoisegate.sdk.typesafe.AuthenticationException
-import me.ethanxu.jevnoisegate.sdk.typesafe.ChoiceAnswer
-import me.ethanxu.jevnoisegate.sdk.typesafe.InternalServerException
-import me.ethanxu.jevnoisegate.sdk.typesafe.PermissionDeniedException
-import me.ethanxu.jevnoisegate.sdk.typesafe.RateLimitException
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeClient
-import me.ethanxu.jevnoisegate.sdk.typesafe.TypeSafeException
+import me.ethanxu.typesafe.sdk.APIConnectionException
+import me.ethanxu.typesafe.sdk.APITimeoutException
+import me.ethanxu.typesafe.sdk.AuthenticationException
+import me.ethanxu.typesafe.sdk.ChoiceAnswer
+import me.ethanxu.typesafe.sdk.InternalServerException
+import me.ethanxu.typesafe.sdk.PermissionDeniedException
+import me.ethanxu.typesafe.sdk.RateLimitException
+import me.ethanxu.typesafe.sdk.TypeSafeClient
+import me.ethanxu.typesafe.sdk.TypeSafeException
 import kotlinx.coroutines.CancellationException
 
 /**

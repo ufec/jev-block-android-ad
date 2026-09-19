@@ -25,7 +25,7 @@ kotlin {
 
             // TypeSafeBackend 暴露在公开 API 上（app 模块需要构造 TypeSafeClient），
             // 因此 SDK 与它传递暴露的协程、序列化都在 API 面上。
-            api(project(":sdk:typesafe"))
+            api(libs.typesafe.sdk)
             api(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }

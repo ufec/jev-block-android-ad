@@ -2,9 +2,9 @@ package me.ethanxu.jevnoisegate.core.decision
 
 import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.model.CategoryConfig
-import me.ethanxu.jevnoisegate.sdk.typesafe.ChoiceAnswer
-import me.ethanxu.jevnoisegate.sdk.typesafe.QuestionId
-import me.ethanxu.jevnoisegate.sdk.typesafe.choice
+import me.ethanxu.typesafe.sdk.ChoiceAnswer
+import me.ethanxu.typesafe.sdk.QuestionId
+import me.ethanxu.typesafe.sdk.choice
 
 /**
  * 把用户的分类配置编译成 TypeSafe 问题。

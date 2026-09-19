@@ -1,6 +1,6 @@
 package me.ethanxu.jevnoisegate.ui.screen.settings
 
-import me.ethanxu.jevnoisegate.sdk.typesafe.ModelCard
+import me.ethanxu.typesafe.sdk.ModelCard
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuDefaults
