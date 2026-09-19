@@ -97,6 +97,26 @@ interface SettingsRepository {
     suspend fun setSmsSenderBlacklist(value: List<String>)
 
     suspend fun setDeveloperMode(value: Boolean)
+
+    // --- 判定门槛与动作 ---
+
+    /**
+     * 覆盖某个类别的判定门槛。
+     *
+     * [value] 会被夹到 `0f..1f` —— 界面上是滑块不会越界，但存储层不该假设调用方一定传对。
+     */
+    suspend fun setCategoryThreshold(name: String, value: Float)
+
+    /**
+     * 覆盖某个类别的动作。
+     *
+     * 收 String 而非 `Action`：见 [AppPreferences.categoryActions]，
+     * `:core:data` 不依赖上层类型，解析由读取侧负责。
+     */
+    suspend fun setCategoryAction(name: String, value: String)
+
+    /** 清空全部覆盖值，回到出厂默认。 */
+    suspend fun resetCategoryOverrides()
 }
 
 internal class DataStoreSettingsRepository(
@@ -212,6 +232,29 @@ internal class DataStoreSettingsRepository(
     override suspend fun setDeveloperMode(value: Boolean) =
         mutate({ it.copy(developerMode = value) }) { it[Keys.DEVELOPER_MODE] = value }
 
+    override suspend fun setCategoryThreshold(name: String, value: Float) {
+        val next = inMemory.value.categoryThresholds + (name to value.coerceIn(0f, 1f))
+        mutate({ it.copy(categoryThresholds = next) }) {
+            it[Keys.CATEGORY_THRESHOLDS] = encodeOverrides(next)
+        }
+    }
+
+    override suspend fun setCategoryAction(name: String, value: String) {
+        val next = inMemory.value.categoryActions + (name to value)
+        mutate({ it.copy(categoryActions = next) }) {
+            it[Keys.CATEGORY_ACTIONS] = encodeOverrides(next)
+        }
+    }
+
+    override suspend fun resetCategoryOverrides() {
+        mutate({ it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap()) }) {
+            // remove 而不是写空串：两者解析出来都是空 map，但 remove 让 DataStore 里
+            // 不再留下这两个键，文件状态与"从未改过"完全一致。
+            it.remove(Keys.CATEGORY_THRESHOLDS)
+            it.remove(Keys.CATEGORY_ACTIONS)
+        }
+    }
+
     /**
      * 先更新内存（让界面立即反映），再异步落盘。
      *
@@ -249,6 +292,11 @@ internal class DataStoreSettingsRepository(
         val PREFER_BLOCK = stringPreferencesKey("prefer_block_rules")
         val SMS_BLACKLIST = stringPreferencesKey("sms_sender_blacklist")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
+
+        // 覆盖值是键值对，stringSet 存不下（它只有键没有值），
+        // 因此用"类别名=值"的换行分隔文本 —— 与上面的规则字段同一套惯例。
+        val CATEGORY_THRESHOLDS = stringPreferencesKey("category_thresholds")
+        val CATEGORY_ACTIONS = stringPreferencesKey("category_actions")
     }
 }
 
@@ -275,9 +323,54 @@ private fun Preferences.toAppPreferences(): AppPreferences {
         preferBlockRules = parseRules(this[stringPreferencesKey("prefer_block_rules")]),
         smsSenderBlacklist = parseRules(this[stringPreferencesKey("sms_sender_blacklist")]),
         developerMode = this[booleanPreferencesKey("developer_mode")] ?: defaults.developerMode,
+        // 解析不出浮点数的条目直接丢弃：与其带着一个 NaN 去比较门槛
+        // （NaN 参与的比较恒为 false，会让该类别永远走不到"执行动作"那一步），
+        // 不如退回出厂默认。
+        categoryThresholds = parseOverrides(this[stringPreferencesKey("category_thresholds")])
+            .mapNotNull { (name, raw) -> raw.toFloatOrNull()?.let { name to it.coerceIn(0f, 1f) } }
+            .toMap(),
+        categoryActions = parseOverrides(this[stringPreferencesKey("category_actions")]),
     )
 }
 
 /** 空串与多余空行都会被过滤，避免用户多敲一个回车就产生一条空规则。 */
 private fun parseRules(raw: String?): List<String> =
     raw.orEmpty().split("\n").map(String::trim).filter(String::isNotEmpty)
+
+/**
+ * 把"类别名 → 值"的映射编成一行一条的文本。
+ *
+ * 值用 `toString()`，因此这个函数同时服务门槛（Float）与动作（String）。
+ * 声明成 `Map<String, *>` 而不是泛型：调用方两种类型各传各的，
+ * 没必要为此引入一个类型参数。
+ */
+internal fun encodeOverrides(values: Map<String, *>): String =
+    values.entries
+        .mapNotNull { (name, value) ->
+            // 空值跳过：写出去也会在 parseOverrides 里被丢掉，
+            // 与其留一行解析不了的垃圾，不如让它根本不出现。两端规则保持对称。
+            val text = value?.toString().orEmpty()
+            if (name.isBlank() || text.isBlank()) null else "$name=$text"
+        }
+        .joinToString("\n")
+
+/**
+ * [encodeOverrides] 的逆运算。
+ *
+ * 用**最后**一个等号切分而不是第一个：值是浮点数或枚举名，都不含等号，
+ * 而类别名万一含等号（用户自定义类别时完全可能），按最后一个切才能正确往返 ——
+ * 按第一个切会把 `a=b=0.9` 切成名字 `a`、值 `b=0.9`，然后因为解析不成浮点数被丢掉。
+ *
+ * 名字或值为空的行直接跳过，不产生垃圾条目。
+ */
+internal fun parseOverrides(raw: String?): Map<String, String> =
+    raw.orEmpty()
+        .split("\n")
+        .mapNotNull { line ->
+            val separator = line.lastIndexOf('=')
+            if (separator <= 0) return@mapNotNull null
+            val name = line.substring(0, separator).trim()
+            val value = line.substring(separator + 1).trim()
+            if (name.isEmpty() || value.isEmpty()) null else name to value
+        }
+        .toMap()

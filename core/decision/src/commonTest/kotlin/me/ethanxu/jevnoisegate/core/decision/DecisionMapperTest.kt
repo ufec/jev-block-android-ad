@@ -42,6 +42,31 @@ class DecisionMapperTest {
         assertEquals(Action.QUARANTINE, decision.action)
     }
 
+    @Test
+    fun `门槛调低后同样的置信度会被执行`() {
+        // 与上面 `confidence below threshold falls back to allow` 是同一条消息、同一个置信度，
+        // 唯一差别是配置里的门槛。这条用例的全部意义就是钉住"门槛来自配置"：
+        // 一旦有人在 DecisionMapper 里写死 0.9，它会立刻变红。
+        val decision = map(
+            BackendOutcome.Decided("广告", confidence = 0.6f),
+            Fixtures.input(categories = Fixtures.categories(adMinConfidence = 0.5f)),
+        )
+
+        assertEquals(Action.QUARANTINE, decision.action)
+    }
+
+    @Test
+    fun `动作来自配置而不是写死的隔离`() {
+        // 用户可以把噪音类的处置改成静默移除（不留隔离区），
+        // 因此动作同样必须由配置决定。
+        val decision = map(
+            BackendOutcome.Decided("广告", confidence = 0.95f),
+            Fixtures.input(categories = Fixtures.categories(adAction = Action.SILENT_SUPPRESS)),
+        )
+
+        assertEquals(Action.SILENT_SUPPRESS, decision.action)
+    }
+
     // -----------------------------------------------------------------------
     // fail-open：所有不确定路径一律放行
     // -----------------------------------------------------------------------
