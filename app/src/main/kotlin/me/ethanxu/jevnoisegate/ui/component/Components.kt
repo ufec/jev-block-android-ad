@@ -13,14 +13,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -499,13 +495,13 @@ val MainTabs: List<TabItem> = listOf(
     ),
     TabItem(
         label = "渠道",
-        selectedIcon = Icons.Filled.Leaderboard,
-        unselectedIcon = Icons.Outlined.Leaderboard,
+        selectedIcon = AppIcons.Filled.Leaderboard,
+        unselectedIcon = AppIcons.Outlined.Leaderboard,
     ),
     TabItem(
         label = "诊断",
-        selectedIcon = Icons.Filled.Speed,
-        unselectedIcon = Icons.Outlined.Speed,
+        selectedIcon = AppIcons.Filled.Speed,
+        unselectedIcon = AppIcons.Outlined.Speed,
     ),
     TabItem(
         label = "设置",

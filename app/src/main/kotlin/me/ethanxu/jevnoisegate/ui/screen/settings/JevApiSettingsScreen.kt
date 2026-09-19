@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +41,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.FilterChip
 import me.ethanxu.jevnoisegate.app.SettingsViewModel
+import me.ethanxu.jevnoisegate.ui.component.AppIcons
 import me.ethanxu.jevnoisegate.core.data.settings.AppPreferences
 import me.ethanxu.jevnoisegate.ui.component.SegmentedColumn
 import me.ethanxu.jevnoisegate.ui.component.SegmentedField
@@ -139,9 +138,9 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             IconButton(onClick = { keyVisible = !keyVisible }) {
                                 Icon(
                                     imageVector = if (keyVisible) {
-                                        Icons.Filled.VisibilityOff
+                                        AppIcons.Filled.VisibilityOff
                                     } else {
-                                        Icons.Filled.Visibility
+                                        AppIcons.Filled.Visibility
                                     },
                                     contentDescription = if (keyVisible) "隐藏" else "显示",
                                 )

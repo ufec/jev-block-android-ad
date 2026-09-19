@@ -45,7 +45,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 开 R8 与资源裁剪。不开的话这个包是 51 MiB —— 因为 material-icons-extended
+            // 那类"库里绝大多数代码用不到"的依赖会原样进包（详细账见 AppIcons.kt 的注释）。
+            // 实测：开之前 51.4 MiB，开之后 3.7 MiB。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
@@ -68,7 +76,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
