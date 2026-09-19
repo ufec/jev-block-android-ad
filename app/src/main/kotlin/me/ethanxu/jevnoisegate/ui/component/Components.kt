@@ -29,6 +29,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 /**
  * 界面组件层。
@@ -553,6 +555,65 @@ fun SegmentedField(
             trailingIcon = trailingIcon,
             supportingText = supportingText?.let { text -> { Text(text) } },
             colors = transparentFieldColors(),
+        )
+    }
+}
+
+/**
+ * 百分比滑块项（0–100）。
+ *
+ * ## 拖动中不落盘
+ *
+ * [onPercentChange] 在一次拖动里会被调用几十次，而每次写设置都要过一次 DataStore 事务
+ * （见 `SettingsRepository.mutate`）。逐次写会把事务排成队，松手之后还在补写 ——
+ * 表现为"拖完过一会儿才真的生效"。因此拖动中只更新调用方的本地状态（界面跟手），
+ * 松手时由 [onPercentChangeFinished] 提交一次。
+ *
+ * ## 为什么 5% 一档
+ *
+ * 这是"宁可放过还是宁可拦住"的取舍旋钮，不是需要精调的参数。
+ * 粗粒度还顺带解决一件事：事件页展示的置信度就是整数百分比（`广告 52%`），
+ * 5% 一档正好让两边对得上，不会出现"显示 52%、滑块停在 52.3%"这种对不上的错位。
+ */
+@Composable
+fun SegmentedSliderItem(
+    title: String,
+    percent: Int,
+    onPercentChange: (Int) -> Unit,
+    onPercentChangeFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+    summary: String? = null,
+    enabled: Boolean = true,
+) {
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                if (summary != null) {
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                text = "$percent%",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Slider(
+            value = percent.coerceIn(0, 100) / 100f,
+            onValueChange = { onPercentChange((it * 100).roundToInt()) },
+            onValueChangeFinished = onPercentChangeFinished,
+            enabled = enabled,
+            // 19 个刻度 = 两端共 21 个位置 = 0/5/10/…/100，每档 5%。
+            steps = 19,
         )
     }
 }

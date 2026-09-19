@@ -92,6 +92,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setDeveloperMode(value: Boolean) = launchSetting { repository.setDeveloperMode(value) }
 
+    fun setCategoryThreshold(name: String, value: Float) =
+        launchSetting { repository.setCategoryThreshold(name, value) }
+
+    fun setCategoryAction(name: String, value: String) =
+        launchSetting { repository.setCategoryAction(name, value) }
+
+    fun resetCategoryOverrides() = launchSetting { repository.resetCategoryOverrides() }
+
     /**
      * 连接测试（JevAPI 页）。
      *
