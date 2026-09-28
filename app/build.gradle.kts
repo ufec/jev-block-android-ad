@@ -1,22 +1,8 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
-}
-
-// TypeSafe API key 从 local.properties 读取，不入库（.gitignore 已排除该文件）。
-//
-// 需要留意：打进 BuildConfig 的字符串可以从 APK 里提取出来。侧载自用可接受，
-// 但若要公开分发，应改为让用户在自己的设备上填写、存进加密存储。
-val typesafeApiKey: String = run {
-    val file = rootProject.file("local.properties")
-    if (!file.exists()) return@run ""
-    val properties = Properties()
-    file.inputStream().use(properties::load)
-    properties.getProperty("typesafe.apiKey").orEmpty()
 }
 
 android {
@@ -30,12 +16,18 @@ android {
         versionCode = 2
         versionName = "0.1.1"
 
-        buildConfigField("String", "TYPESAFE_API_KEY", "\"$typesafeApiKey\"")
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    androidResources {
+        noCompress += listOf("tflite", "bin")
+        // Models remain in the repository for offline verification, but never enter the APK.
+        ignoreAssetsPattern = "laya"
     }
 
     compileOptions {
@@ -91,9 +83,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    // 代理探测直接用 OkHttp，不经 SDK —— 理由见 ProxyProbe.kt（SDK 客户端带重试，
-    // 会把"代理不通"拖成三十秒才报错；且它同时验证 API Key，两件事会混在一起）。
-    implementation(libs.okhttp)
+    implementation(libs.litert)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

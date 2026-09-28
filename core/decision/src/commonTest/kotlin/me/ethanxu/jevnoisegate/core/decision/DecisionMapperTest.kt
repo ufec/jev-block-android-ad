@@ -132,7 +132,7 @@ class DecisionMapperTest {
     @Test
     fun `failure keeps the original event for the recycle bin and diagnostics`() {
         val input = Fixtures.input()
-        val decision = map(BackendOutcome.Failed(FailureReason.TIMEOUT), input)
+        val decision = map(BackendOutcome.Failed(FailureReason.MODEL_ERROR), input)
         assertEquals(input.event, decision.event)
     }
 

@@ -61,15 +61,12 @@ data class MessageEventEntity(
     val decidedBy: String? = null,
     val category: String? = null,
     val confidence: Float? = null,
-    /** 仅降级放行时非空，说明是超时、限流还是断网。 */
+    /** 仅降级放行时非空，说明本地模型故障。 */
     val failureReason: String? = null,
-    /** 模型往返耗时（毫秒）。这是"能否跑赢通知震动"的直接证据。 */
+    /** 本地模型耗时（毫秒）。 */
     val latencyMs: Long? = null,
     /**
-     * 是否真的把内容发送到了外部 API。
-     *
-     * 独立成列是为了让"验证码永不上送"这个隐私承诺**可被统计验证**，
-     * 而不是只写在注释里。
+     * 旧版数据兼容列。本地模型版所有新记录均为 false。
      */
     val uploaded: Boolean? = null,
 )
@@ -164,14 +161,14 @@ interface ObservedEventDao {
     suspend fun channelStats(bucketKey: String, excludeId: String): ChannelStats
 
     /**
-     * 模型往返耗时，供诊断页算 P50/P95。
+     * 本地模型耗时，供诊断页算 P50/P95。
      *
-     * **只取真正发起过网络请求的记录**（MODEL 与 FALLBACK）：
-     * OTP 闸门、号码黑名单、指纹缓存这些路径根本不调 API，延迟恒为 0。
+     * **只取真正运行模型的记录**（MODEL 与 FALLBACK）：
+     * OTP 闸门、号码黑名单这些路径不调模型，延迟恒为 0。
      * 把它们算进来会让 P50/P95 显著偏低 —— 指标名字写着"模型往返延迟"，
      * 却混进了一堆 0，结果是"看起来比实际快"，比没有指标更误导。
      *
-     * FALLBACK 要保留：它虽然是失败，但确实发起了请求且耗时真实（含重试），
+     * FALLBACK 要保留：它虽然是失败，但初始化或推理耗时真实，
      * 而那恰恰是用户会感知到的卡顿。
      */
     @Query(
@@ -192,10 +189,6 @@ interface ObservedEventDao {
         """,
     )
     fun observeActionCounts(): Flow<List<ActionCount>>
-
-    /** 实际外发到 API 的事件数。用于核验隐私承诺是否兑现。 */
-    @Query("SELECT COUNT(*) FROM observed_event WHERE uploaded = 1")
-    fun observeUploadedCount(): Flow<Int>
 
     @Query("DELETE FROM observed_event")
     suspend fun clear()

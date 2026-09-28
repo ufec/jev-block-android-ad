@@ -30,7 +30,7 @@ enum class LogLevel(val value: Int, val label: String) {
 enum class LogCategory(val label: String) {
     NOTIFICATION("通知"),
     SMS("短信"),
-    HTTP("请求"),
+    MODEL("模型"),
     DECISION("判断"),
     SYSTEM("系统"),
 }
@@ -305,7 +305,7 @@ object AppLog {
                 seq = 0,
                 timestampMs = parts[0].toLong(),
                 level = LogLevel.fromValue(parts[1].toInt()),
-                category = LogCategory.valueOf(parts[2]),
+                category = if (parts[2] == "HTTP") LogCategory.SYSTEM else LogCategory.valueOf(parts[2]),
                 tag = unescape(parts[3]),
                 // 消息里可能含 '|'，所以第 5 段之后要重新拼回。
                 message = unescape(parts.drop(4).joinToString("|")),

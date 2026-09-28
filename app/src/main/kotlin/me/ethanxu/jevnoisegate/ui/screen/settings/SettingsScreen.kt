@@ -11,7 +11,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.ethanxu.jevnoisegate.app.SettingsViewModel
-import me.ethanxu.jevnoisegate.app.proxyStatus
 import me.ethanxu.jevnoisegate.ui.component.SegmentedArrowItem
 import me.ethanxu.jevnoisegate.ui.component.SegmentedColumn
 import me.ethanxu.jevnoisegate.ui.navigation.LocalNavigator
@@ -52,13 +51,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             SegmentedColumn(title = "判断") {
                 item {
                     SegmentedArrowItem(
-                        title = "JevAPI 设置",
-                        summary = if (prefs.isApiConfigured) "已配置" else "未配置 · 判断会降级放行",
-                        onClick = { navigator.push(Route.JevApiSettings) },
-                    )
-                }
-                item {
-                    SegmentedArrowItem(
                         title = "用户偏好规则",
                         summary = userRulesSummary(prefs),
                         onClick = { navigator.push(Route.UserRules) },
@@ -73,15 +65,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             "已拉黑 ${prefs.smsSenderBlacklist.size} 个号码 · 命中直接拦截"
                         },
                         onClick = { navigator.push(Route.SmsBlacklist) },
-                    )
-                }
-                item {
-                    SegmentedArrowItem(
-                        title = "网络代理",
-                        // 摘要与警告色都按「已配置但没生效」来判定 —— 那才是需要用户注意的状态。
-                        summary = proxyStatus(prefs).summary,
-                        summaryIsWarning = proxyStatus(prefs).isWarning,
-                        onClick = { navigator.push(Route.ProxySettings) },
                     )
                 }
                 item {

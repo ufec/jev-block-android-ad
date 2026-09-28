@@ -83,8 +83,8 @@ sealed interface BackendOutcome {
  * 判断后端。
  *
  * 抽成接口有两个目的：
- * 1. 让 [FakeBackend] 可以在单测与断网演练中替换真实后端；
- * 2. 留住"以后可能接入本地端侧模型"这个扩展位 —— 那正是当初为延迟与成本留的后路。
+ * 1. 让 [FakeBackend] 可以在单测中替换真实本地模型；
+ * 2. 核心流水线不依赖 Android 或具体的推理运行时。
  */
 interface DecisionBackend {
     suspend fun decide(input: DecisionInput): BackendOutcome

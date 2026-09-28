@@ -10,10 +10,7 @@ import me.ethanxu.jevnoisegate.core.model.DecidedBy
 import me.ethanxu.jevnoisegate.core.model.FinalDecision
 
 /**
- * 一次判断的结果，连同"是否真的发送到了外部 API"。
- *
- * [uploaded] 是刻意暴露的：隐私承诺（验证码永不上送）必须是可断言、可观测的，
- * 而不是只写在文档里。诊断页据此统计"实际上送率"。
+ * 一次判断的结果。`uploaded` 保留为历史数据库列的兼容值，本地版本恒为 false。
  */
 data class PipelineResult(
     val decision: FinalDecision,
@@ -36,7 +33,7 @@ class MessagePipeline(
 ) {
 
     suspend fun process(input: DecisionInput): PipelineResult {
-        // ① OTP 闸门 —— 命中即放行，且请求根本不会发出去。
+        // ① OTP 闸门 —— 命中即放行，且不运行模型。
         if (OtpGate.isOtpLike(input.event.body)) {
             return PipelineResult(
                 decision = FinalDecision(
@@ -48,7 +45,7 @@ class MessagePipeline(
             )
         }
 
-        // ② 交给后端。只在这一段计时 —— 它才是"能否跑赢震动"所关心的那个数字。
+        // ② 交给本地模型。只在这一段计时。
         val startedAt = clock.nowMillis()
         val outcome = backend.decide(input)
         val elapsed = clock.nowMillis() - startedAt
@@ -56,7 +53,7 @@ class MessagePipeline(
         // ③ 映射为动作。fail-open 在这里落地，所有不确定路径一律放行。
         return PipelineResult(
             decision = DecisionMapper.map(input, outcome, elapsed),
-            uploaded = true,
+            uploaded = false,
         )
     }
 }

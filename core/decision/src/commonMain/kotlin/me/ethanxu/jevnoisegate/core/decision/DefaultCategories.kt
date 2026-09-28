@@ -8,7 +8,7 @@ import me.ethanxu.jevnoisegate.core.model.CategoryConfig
  *
  * 这是**种子配置**而非硬编码策略：用户可以在「设置 → 用户偏好规则 → 判定门槛」里
  * 改掉每个类别的动作与门槛，代码不做任何假设。它的作用有两个 ——
- * 让首次启动时答案空间非空（[QuestionFactory.validate] 要求至少一个分类），
+ * 让首次启动时答案空间非空，
  * 以及给没调过的用户一个合理起点。
  *
  * 用户的覆盖是**叠加式**的（见 [applyCategoryOverrides]）：没改过的项一直用这里的值，
@@ -23,7 +23,7 @@ import me.ethanxu.jevnoisegate.core.model.CategoryConfig
  * - **广告 / 0.9**：误拦广告的代价其实很低，但"用户发现通知被吃掉"的摩擦很真实，
  *   因此门槛设高，宁可放过。
  * - **诈骗 / 0.7**：门槛低于广告，因为漏掉诈骗的代价更高。
- * - **正常 / ALLOW**：作为 catch-all，是 [QuestionFactory.validate] 强制要求的那个放行类别。
+ * - **正常 / ALLOW**：作为 catch-all，保证不确定消息可被放行。
  */
 object DefaultCategories {
 

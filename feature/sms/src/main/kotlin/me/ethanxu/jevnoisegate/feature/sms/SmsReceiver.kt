@@ -43,6 +43,7 @@ class SmsReceiver : BroadcastReceiver() {
     lateinit var dispatcher: DecisionDispatcher
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (!me.ethanxu.jevnoisegate.core.common.ServiceState.running) return
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
         val raw = runCatching {
@@ -75,7 +76,7 @@ class SmsReceiver : BroadcastReceiver() {
                             "cat=${decision.category} latency=${decision.latencyMillis}ms"
                     }
 
-                    if (decision.action != Action.ALLOW) {
+                    if (decision.action != Action.ALLOW && me.ethanxu.jevnoisegate.core.common.ServiceState.running) {
                         // 短信的"拦截"只能做到**通知层**：撤销短信 App 弹出的那条通知。
                         // 短信本体仍留在收件箱（只有默认短信应用能删），这是系统限制。
                         //

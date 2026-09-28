@@ -36,8 +36,6 @@ import me.ethanxu.jevnoisegate.ui.navigation.rememberNavigator
 import me.ethanxu.jevnoisegate.ui.screen.diagnostics.LogScreen
 import me.ethanxu.jevnoisegate.ui.screen.main.MainScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.AppFilterSettingsScreen
-import me.ethanxu.jevnoisegate.ui.screen.settings.JevApiSettingsScreen
-import me.ethanxu.jevnoisegate.ui.screen.settings.ProxySettingsScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.SmsBlacklistScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.UserRulesScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.ThemeSettingsScreen
@@ -121,12 +119,6 @@ private fun AppNavHost(navigator: Navigator) {
                     }
                 }
 
-                Route.JevApiSettings -> NavEntry(key) {
-                    SubPageScaffold(title = "JevAPI 设置", onBack = { navigator.pop() }) { padding ->
-                        Box(Modifier.padding(padding)) { JevApiSettingsScreen() }
-                    }
-                }
-
                 Route.UserRules -> NavEntry(key) {
                     // UserRulesScreen 自带 SubPageScaffold。
                     UserRulesScreen()
@@ -135,11 +127,6 @@ private fun AppNavHost(navigator: Navigator) {
                 Route.SmsBlacklist -> NavEntry(key) {
                     // SmsBlacklistScreen 自带 SubPageScaffold。
                     SmsBlacklistScreen()
-                }
-
-                Route.ProxySettings -> NavEntry(key) {
-                    // ProxySettingsScreen 自带 SubPageScaffold。
-                    ProxySettingsScreen()
                 }
 
                 Route.AppFilterSettings -> NavEntry(key) {

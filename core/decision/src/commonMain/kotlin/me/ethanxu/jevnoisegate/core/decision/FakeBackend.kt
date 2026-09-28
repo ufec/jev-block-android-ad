@@ -3,9 +3,9 @@ package me.ethanxu.jevnoisegate.core.decision
 import me.ethanxu.jevnoisegate.core.model.FailureReason
 
 /**
- * 可脚本化的假后端，用于单测与断网演练。
+ * 可脚本化的假后端，用于单测与本地模型故障演练。
  *
- * 真实后端无法在单测里确定性地产生"限流"或"超时"，但没有这些场景就无法验证
+ * 真实后端无法在单测里确定性地产生模型故障，但没有这些场景就无法验证
  * fail-open 是否真的生效 —— 而 fail-open 恰恰是本系统最不能出错的地方。
  */
 class FakeBackend(
@@ -36,7 +36,7 @@ class FakeBackend(
 
         /** 恒定失败，用于验证降级路径。 */
         fun alwaysFail(
-            reason: FailureReason = FailureReason.NETWORK,
+            reason: FailureReason = FailureReason.MODEL_ERROR,
         ): FakeBackend = FakeBackend { BackendOutcome.Failed(reason, "fake failure for tests") }
     }
 }

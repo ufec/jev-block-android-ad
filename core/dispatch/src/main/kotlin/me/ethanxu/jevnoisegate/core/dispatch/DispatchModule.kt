@@ -29,7 +29,7 @@ object DispatchModule {
      *
      * 每次 `current()` 都重新读一遍偏好，而不是在构造时读一次：
      * 用户拖完滑块，下一条通知就该按新门槛判断，不该要求重启。
-     * 代价是读一次 StateFlow 加四个元素的 map，相对一次网络往返可忽略。
+     * 代价是读一次 StateFlow 加四个元素的 map，相对一次模型推理可忽略。
      */
     @Provides
     @Singleton

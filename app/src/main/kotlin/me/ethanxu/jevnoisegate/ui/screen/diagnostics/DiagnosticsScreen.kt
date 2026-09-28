@@ -49,8 +49,7 @@ fun DiagnosticsScreen(
     val devMode = prefs.developerMode
     val latency by viewModel.latencyStats.collectAsStateWithLifecycle()
     val actionCounts by viewModel.actionCounts.collectAsStateWithLifecycle()
-    val uploaded by viewModel.uploadedCount.collectAsStateWithLifecycle()
-    val total by viewModel.totalCount.collectAsStateWithLifecycle()
+    val modelStatus by settings.localModelStatus.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -59,7 +58,7 @@ fun DiagnosticsScreen(
     ) {
         item { LatencyCard(latency) }
         item { ActionCard(actionCounts) }
-        item { PrivacyCard(uploaded = uploaded, total = total) }
+        item { LocalModelCard(modelStatus.message) }
         item { LogEntryCard(onClick = { navigator.push(Route.Logs) }) }
         item { DeveloperModeCard(checked = devMode, onCheckedChange = settings::setDeveloperMode) }
         // 自测工具只在开发者模式下出现 —— 它会往统计里写入自产数据，
@@ -74,11 +73,11 @@ fun DiagnosticsScreen(
 private fun LatencyCard(latency: LatencyStats) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("模型往返延迟", style = MaterialTheme.typography.titleMedium)
+            Text("本地推理延迟", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
                 "P95 才是决定体验的那个数 —— 用户感知到的是尾部延迟，而不是平均值。" +
-                    "它同时也是「网络往返能否跑赢通知震动」的直接答案。",
+                    "它也能反映本机推理能否及时处理通知。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -166,7 +165,7 @@ private fun LogEntryCard(onClick: () -> Unit) {
             Text("运行日志", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "查看通知监听、短信与 HTTP 请求的运行日志，可记录等级与筛选条件",
+                text = "查看通知监听、短信与本地模型的运行日志，可记录等级与筛选条件",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -223,8 +222,8 @@ private fun SelfTestCard() {
             Text("自测", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "发一条通知走完整链路。几秒后看它是否还在通知栏里 —— " +
-                    "广告样张应被撤销，验证码样张应保留。",
+                text = "发一条通知走完整链路，在事件页查看类别、置信度和动作。" +
+                    "广告达到设定门槛时会隔离，验证码样张应保留。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -282,7 +281,7 @@ private fun SelfTestCard() {
 
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "提示：需先配好 API Key，否则判断会降级放行，样张与自定义内容都不会被拦。",
+                text = "模型正在后台准备；首次启动需要等待初始化完成。模型失败时放行。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -291,25 +290,17 @@ private fun SelfTestCard() {
 }
 
 @Composable
-private fun PrivacyCard(uploaded: Int, total: Int) {    Card(modifier = Modifier.fillMaxWidth()) {
+private fun LocalModelCard(status: String) {    Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("隐私核验", style = MaterialTheme.typography.titleMedium)
+            Text("本地模型", style = MaterialTheme.typography.titleMedium)
+            Text(status, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "验证码类消息会被本地闸门拦下，永不上送 —— 它的 uploaded 始终为 0。" +
-                    "这个数字让隐私承诺可被核验，而不是只写在文档里。",
+                "短信和通知在本机完成分类。模型文件随应用安装，应用没有网络权限。" +
+                    "验证码仍由本地闸门优先放行。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("已上送 API", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("$uploaded 条", style = MaterialTheme.typography.bodyMedium)
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("本地拦截未上送", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("${(total - uploaded).coerceAtLeast(0)} 条", style = MaterialTheme.typography.bodyMedium)
-            }
         }
     }
 }

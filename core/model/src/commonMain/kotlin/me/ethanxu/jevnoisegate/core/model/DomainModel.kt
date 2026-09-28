@@ -31,10 +31,10 @@ enum class DecidedBy {
     /** 用户手动纠正（含从回收站捞回）。最高权重，永不被覆盖。 */
     USER,
 
-    /** 本地 OTP 保险丝命中，直接放行且不曾上送 API。 */
+    /** 本地 OTP 保险丝命中，不运行模型直接放行。 */
     OTP_GATE,
 
-    /** 用户配置的号码黑名单命中，直接拦截且不曾上送 API。 */
+    /** 用户配置的号码黑名单命中，不运行模型直接拦截。 */
     BLACKLIST,
 
     /** 模型判断结果。 */
@@ -47,42 +47,11 @@ enum class DecidedBy {
     FALLBACK,
 }
 
-/**
- * 决策降级放行的原因。
- *
- * 存在的理由是**诊断**：`DecidedBy.FALLBACK` 只说明"我们放行了"，不说明"因为什么放行"。
- * 而"最近 30% 的请求都超时"和"最近 30% 的请求都被限流"需要完全不同的处理，
- * 诊断页必须能区分。
- */
+/** 本地模型不能给出可靠分类时的降级原因。 */
 enum class FailureReason {
-    /** 单次尝试超时。 */
-    TIMEOUT,
-
-    /** 连接层失败（DNS、TLS、连接中断）。 */
-    NETWORK,
-
-    /** 触发限流（HTTP 429）。 */
-    RATE_LIMITED,
-
-    /**
-     * 鉴权失败（HTTP 401 / 403）。
-     *
-     * 与 [INVALID_RESPONSE] 分开是因为处理方式完全不同：鉴权失败意味着 API key 没配、
-     * 配错了或被吊销 —— 那是**必须去修配置**，而不是重试或调参。
-     */
-    AUTH_FAILED,
-
-    /** 服务端错误（HTTP 5xx，含 529 过载）。 */
-    SERVER_ERROR,
-
-    /** 响应无法解析，或问题的答案缺失/类型不符。 */
-    INVALID_RESPONSE,
-
-    /** 分类配置缺失或非法（如重名），请求根本没发出去。 */
-    NOT_CONFIGURED,
-
-    /** 用户关闭了模型判断。 */
-    DISABLED,
+    MODEL_UNAVAILABLE,
+    MODEL_ERROR,
+    INVALID_INPUT,
 }
 
 /**
@@ -106,7 +75,7 @@ data class ChannelContext(
 /**
  * 用户的分类配置 —— 声明式知识的唯一载体。
  *
- * [name] 会**直接成为 TypeSafe `Choice.criteria` 的 key**，即"配置即答案空间"：
+ * [name] 会成为本地 Laya choice 问题的类别名，即"配置即答案空间"：
  * 增加一个分类不需要改任何代码，只是多一个 Choice 选项。
  */
 data class CategoryConfig(
@@ -114,7 +83,7 @@ data class CategoryConfig(
     /** 进入 `criteria` 的选项描述，是模型判断依据的主要来源。 */
     val description: String,
     /**
-     * 辅助提示词。由 `QuestionFactory` 渲染进该分类的 `criteria` 描述里 ——
+     * 辅助关键词，可用于类别描述与诊断 ——
      * 关键词天然是**分类级**的（"优惠/促销"属于广告，"转账/账户异常"属于诈骗），
      * 因此放进对应选项的 rubric 比放在全局 state 更准确。
      */

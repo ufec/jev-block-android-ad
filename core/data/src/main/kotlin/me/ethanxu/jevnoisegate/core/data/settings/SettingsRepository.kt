@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.CoroutineScope
@@ -14,7 +13,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.ethanxu.jevnoisegate.core.common.log.AppLog
@@ -44,9 +42,7 @@ interface SettingsRepository {
      * 阻塞至首次从磁盘加载完成。
      *
      * 存在的理由：内存 StateFlow 的初值是默认值，而真实配置要等一次磁盘读取。
-     * 任何**在启动阶段就需要读到真实配置**的下游（构造 HTTP 客户端、初始化日志等级）
-     * 必须先调用它，否则会静默按默认值工作 —— 表现为"用户配了 API key 但请求打到了默认地址"，
-     * 而且不报错，极难排查。
+     * 日志等级等启动配置必须先加载完成，避免使用默认值。
      */
     fun awaitReady()
 
@@ -54,40 +50,11 @@ interface SettingsRepository {
     suspend fun setColorMode(value: Int)
     suspend fun setKeyColor(value: Int)
 
-    suspend fun setApiKey(value: String)
-    suspend fun setBaseUrl(value: String)
-    suspend fun setModel(value: String)
-    suspend fun setTimeoutMs(value: Long)
-
     /** 关闭/开启对某个 App 的通知监听。 */
     suspend fun setAppMuted(packageName: String, muted: Boolean)
 
     /** 设置运行日志的最小记录等级（`AppLog.OFF` 表示关闭）。 */
     suspend fun setLogLevel(value: Int)
-
-    // --- 网络代理 ---
-
-    /**
-     * 保存一组代理配置，并把它记为「已通过测试」。
-     *
-     * 这是**唯一**的代理写入入口，而且只应该在测试通过之后调用 —— 界面上的改动在保存前
-     * 只留在表单里。于是"当前生效的代理必然是测过的"由写入路径本身保证，
-     * 而不是靠每个调用点自觉。
-     *
-     * 五个字段加指纹**一次写完**：分开写会出现"主机已更新、端口还是旧的"这种中间态，
-     * 而一旦有人拿这个中间态去建客户端，就得到一个半配置的代理。
-     *
-     * 指纹由这里按**实际存下来的那组值**计算，因此必然与 [AppPreferences.isProxyVerified]
-     * 的算法一致。让调用方算好再传进来，只要有一处归一化方式不同（比如谁 trim 了谁没 trim），
-     * 验证就会永远对不上 —— 那个 bug 已经踩过一次。
-     */
-    suspend fun saveProxyConfig(
-        type: String,
-        host: String,
-        port: Int,
-        username: String,
-        password: String,
-    )
 
     // --- 用户偏好规则 ---
 
@@ -136,7 +103,14 @@ internal class DataStoreSettingsRepository(
     init {
         // 启动时从磁盘载入一次。之后内存是权威，磁盘只是持久化副本。
         scope.launch {
-            val loaded = dataStore.data.first().toAppPreferences()
+            // Migration removes secrets and connection settings left by older API builds.
+            val loaded = dataStore.edit { prefs ->
+                listOf("api_key", "base_url", "model", "proxy_type", "proxy_host",
+                    "proxy_username", "proxy_password", "proxy_verified_fingerprint")
+                    .forEach { prefs.remove(stringPreferencesKey(it)) }
+                prefs.remove(intPreferencesKey("proxy_port"))
+                prefs.remove(androidx.datastore.preferences.core.longPreferencesKey("timeout_ms"))
+            }.toAppPreferences()
             inMemory.value = loaded
             // 日志等级必须在任何业务代码产出日志之前生效，否则启动早期的日志会漏记。
             AppLog.configure(loaded.logLevel)
@@ -160,22 +134,6 @@ internal class DataStoreSettingsRepository(
         it[Keys.KEY_COLOR] = value
     }
 
-    override suspend fun setApiKey(value: String) = mutate({ it.copy(apiKey = value) }) {
-        it[Keys.API_KEY] = value
-    }
-
-    override suspend fun setBaseUrl(value: String) = mutate({ it.copy(baseUrl = value) }) {
-        it[Keys.BASE_URL] = value
-    }
-
-    override suspend fun setModel(value: String) = mutate({ it.copy(model = value) }) {
-        it[Keys.MODEL] = value
-    }
-
-    override suspend fun setTimeoutMs(value: Long) = mutate({ it.copy(timeoutMs = value) }) {
-        it[Keys.TIMEOUT_MS] = value
-    }
-
     override suspend fun setAppMuted(packageName: String, muted: Boolean) {
         val current = inMemory.value.mutedPackages
         mutate({ it.copy(mutedPackages = if (muted) current + packageName else current - packageName) }) {
@@ -188,36 +146,6 @@ internal class DataStoreSettingsRepository(
         // 到落盘完成之前的日志仍然按旧等级过滤。
         AppLog.configure(value)
         mutate({ it.copy(logLevel = value) }) { it[Keys.LOG_LEVEL] = value }
-    }
-
-    override suspend fun saveProxyConfig(
-        type: String,
-        host: String,
-        port: Int,
-        username: String,
-        password: String,
-    ) {
-        val fingerprint = proxyFingerprint(type, host, port, username, password)
-        mutate(
-            updateMemory = {
-                it.copy(
-                    proxyType = type,
-                    proxyHost = host,
-                    proxyPort = port,
-                    proxyUsername = username,
-                    proxyPassword = password,
-                    proxyVerifiedFingerprint = fingerprint,
-                )
-            },
-            updateDisk = {
-                it[Keys.PROXY_TYPE] = type
-                it[Keys.PROXY_HOST] = host
-                it[Keys.PROXY_PORT] = port
-                it[Keys.PROXY_USERNAME] = username
-                it[Keys.PROXY_PASSWORD] = password
-                it[Keys.PROXY_VERIFIED_FINGERPRINT] = fingerprint
-            },
-        )
     }
 
     override suspend fun setPreferAllowRules(value: List<String>) =
@@ -274,18 +202,8 @@ internal class DataStoreSettingsRepository(
         val UI_MODE = stringPreferencesKey("ui_mode")
         val COLOR_MODE = intPreferencesKey("color_mode")
         val KEY_COLOR = intPreferencesKey("key_color")
-        val API_KEY = stringPreferencesKey("api_key")
-        val BASE_URL = stringPreferencesKey("base_url")
-        val MODEL = stringPreferencesKey("model")
-        val TIMEOUT_MS = longPreferencesKey("timeout_ms")
         val MUTED_PACKAGES = stringSetPreferencesKey("muted_packages")
         val LOG_LEVEL = intPreferencesKey("log_level")
-        val PROXY_TYPE = stringPreferencesKey("proxy_type")
-        val PROXY_HOST = stringPreferencesKey("proxy_host")
-        val PROXY_PORT = intPreferencesKey("proxy_port")
-        val PROXY_USERNAME = stringPreferencesKey("proxy_username")
-        val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
-        val PROXY_VERIFIED_FINGERPRINT = stringPreferencesKey("proxy_verified_fingerprint")
         // 规则是自由文本，可能含任意字符；用换行分隔成单条，
         // 而不是 stringSet —— 后者会丢失顺序，而顺序就是用户心里的优先级。
         val PREFER_ALLOW = stringPreferencesKey("prefer_allow_rules")
@@ -306,19 +224,8 @@ private fun Preferences.toAppPreferences(): AppPreferences {
         uiMode = this[stringPreferencesKey("ui_mode")] ?: defaults.uiMode,
         colorMode = this[intPreferencesKey("color_mode")] ?: defaults.colorMode,
         keyColor = this[intPreferencesKey("key_color")] ?: defaults.keyColor,
-        apiKey = this[stringPreferencesKey("api_key")] ?: defaults.apiKey,
-        baseUrl = this[stringPreferencesKey("base_url")] ?: defaults.baseUrl,
-        model = this[stringPreferencesKey("model")] ?: defaults.model,
-        timeoutMs = this[longPreferencesKey("timeout_ms")] ?: defaults.timeoutMs,
         mutedPackages = this[stringSetPreferencesKey("muted_packages")] ?: defaults.mutedPackages,
         logLevel = this[intPreferencesKey("log_level")] ?: defaults.logLevel,
-        proxyType = this[stringPreferencesKey("proxy_type")] ?: defaults.proxyType,
-        proxyHost = this[stringPreferencesKey("proxy_host")] ?: defaults.proxyHost,
-        proxyPort = this[intPreferencesKey("proxy_port")] ?: defaults.proxyPort,
-        proxyUsername = this[stringPreferencesKey("proxy_username")] ?: defaults.proxyUsername,
-        proxyPassword = this[stringPreferencesKey("proxy_password")] ?: defaults.proxyPassword,
-        proxyVerifiedFingerprint = this[stringPreferencesKey("proxy_verified_fingerprint")]
-            ?: defaults.proxyVerifiedFingerprint,
         preferAllowRules = parseRules(this[stringPreferencesKey("prefer_allow_rules")]),
         preferBlockRules = parseRules(this[stringPreferencesKey("prefer_block_rules")]),
         smsSenderBlacklist = parseRules(this[stringPreferencesKey("sms_sender_blacklist")]),

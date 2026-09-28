@@ -8,3 +8,6 @@ captures/
 .externalNativeBuild/
 .cxx/
 .kotlin/
+
+# Runtime models are downloaded by the app; keep local verification copies untracked.
+app/src/main/assets/laya/

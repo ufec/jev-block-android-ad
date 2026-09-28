@@ -26,15 +26,6 @@ sealed interface Route : NavKey {
         override val id = "settings/theme"
     }
 
-    data object JevApiSettings : Route {
-        override val id = "settings/api"
-    }
-
-    /** 网络代理。与 API 凭据分开：一个是链路怎么出去，一个是我是谁。 */
-    data object ProxySettings : Route {
-        override val id = "settings/proxy"
-    }
-
     /** 用户偏好规则。作为软约束随 state 交给模型。 */
     data object UserRules : Route {
         override val id = "settings/user-rules"
@@ -57,7 +48,7 @@ sealed interface Route : NavKey {
     companion object {
         val all: List<Route> =
             listOf(
-                Main, ThemeSettings, JevApiSettings, ProxySettings,
+                Main, ThemeSettings,
                 UserRules, SmsBlacklist, AppFilterSettings, Logs,
             )
 

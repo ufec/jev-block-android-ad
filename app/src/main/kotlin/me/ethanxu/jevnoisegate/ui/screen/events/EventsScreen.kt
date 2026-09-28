@@ -68,6 +68,10 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
     val events by viewModel.events.collectAsStateWithLifecycle()
     val groups by viewModel.eventGroups.collectAsStateWithLifecycle()
     val total by viewModel.totalCount.collectAsStateWithLifecycle()
+    val model by viewModel.modelStatus.collectAsStateWithLifecycle()
+    val connected by viewModel.serviceConnected.collectAsStateWithLifecycle()
+    val enabled by viewModel.serviceEnabled.collectAsStateWithLifecycle()
+    val notice by viewModel.serviceNotice.collectAsStateWithLifecycle()
 
     // 用户会离开 App 去设置页授权，因此每次回到前台都重新读取权限状态。
     var notificationAccess by remember { mutableStateOf(context.hasNotificationAccess()) }
@@ -93,6 +97,38 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("降噪服务", style = MaterialTheme.typography.titleMedium)
+                    Text(model.message, style = MaterialTheme.typography.bodySmall)
+                    if (model.busy) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { model.progress }, modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Text("监听服务：${if (connected) "已连接" else "未连接"}")
+                    Text(when {
+                        enabled && connected && model.ready -> "降噪正在运行"
+                        enabled -> "降噪已暂停，等待模型或监听服务就绪"
+                        else -> "降噪未开启"
+                    })
+                    Text("首次下载约 679 MB；消息分类在本机完成。", style = MaterialTheme.typography.bodySmall)
+                    if (!model.ready) {
+                        OutlinedButton(onClick = viewModel::downloadModel, enabled = !model.busy) { Text("下载 / 继续下载模型") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = viewModel::toggleService, enabled = enabled || !model.busy) {
+                            Text(if (enabled) "停止降噪" else "开启降噪")
+                        }
+                        if (notificationAccess && !connected) {
+                            OutlinedButton(onClick = viewModel::reconnectService) { Text("重新连接") }
+                        }
+                    }
+                    if (notice.isNotBlank()) Text(notice, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         item {
             PermissionCard(
                 notificationAccess = notificationAccess,

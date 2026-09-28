@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.asStateFlow
+import me.ethanxu.jevnoisegate.ui.util.hasNotificationAccess
 import me.ethanxu.jevnoisegate.core.data.ActionCount
 import me.ethanxu.jevnoisegate.core.data.ChannelCount
 import me.ethanxu.jevnoisegate.core.data.MessageEventEntity
@@ -60,7 +62,46 @@ data class AppEventGroup(
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val dao: ObservedEventDao,
+    private val localModel: LocalLayaBackend,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
+    val modelStatus = localModel.status
+    val serviceConnected = me.ethanxu.jevnoisegate.core.common.ServiceState.connected
+    val serviceEnabled = me.ethanxu.jevnoisegate.core.common.ServiceState.enabled
+    private val notice = kotlinx.coroutines.flow.MutableStateFlow("")
+    val serviceNotice = notice.asStateFlow()
+    fun downloadModel() = localModel.download()
+
+    fun toggleService() {
+        val state = me.ethanxu.jevnoisegate.core.common.ServiceState
+        if (state.enabled.value) {
+            state.enable(false)
+            context.getSharedPreferences("service", 0).edit().putBoolean("enabled", false).apply()
+            notice.value = "降噪已停止"
+            return
+        }
+        viewModelScope.launch {
+            notice.value = "正在检查启动条件…"
+            localModel.prepare()
+            when {
+                !modelStatus.value.ready -> notice.value = "请先下载并准备模型"
+                !context.hasNotificationAccess() -> notice.value = "请先授予通知使用权"
+                !state.connected.value -> notice.value = "通知监听服务尚未连接，请点击重新连接或检查系统授权"
+                else -> {
+                    state.enable(true)
+                    context.getSharedPreferences("service", 0).edit().putBoolean("enabled", true).apply()
+                    notice.value = "降噪已开启"
+                }
+            }
+        }
+    }
+
+    fun reconnectService() {
+        android.service.notification.NotificationListenerService.requestRebind(
+            android.content.ComponentName(context, me.ethanxu.jevnoisegate.feature.notification.NoiseGateNotificationListener::class.java),
+        )
+        notice.value = "已请求系统重新连接，请等待服务状态更新"
+    }
 
     val events: StateFlow<List<MessageEventEntity>> =
         dao.observeRecent(RECENT_LIMIT).asState(emptyList())
@@ -97,9 +138,6 @@ class MainViewModel @Inject constructor(
         dao.observeLatencies().map(LatencyStats::from).asState(LatencyStats.EMPTY)
 
     val actionCounts: StateFlow<List<ActionCount>> = dao.observeActionCounts().asState(emptyList())
-
-    /** 实际上送 API 的事件数 —— 隐私承诺的可核验指标。 */
-    val uploadedCount: StateFlow<Int> = dao.observeUploadedCount().asState(0)
 
     fun clearAll() {
         viewModelScope.launch { dao.clear() }

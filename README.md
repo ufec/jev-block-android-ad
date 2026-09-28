@@ -1,237 +1,50 @@
 # JevNoiseGate
 
-An Android noise gate for notifications and SMS.
+Android 短信与通知降噪应用。消息在设备上由 Laya Multilingual LiteRT 模型分类，再按用户设置的动作与置信度门槛处理。联网仅用于下载模型，不使用 API Key、代理或云端判断，不上传短信或通知内容。
 
-Rule-based blockers are brittle in both directions: a keyword list that
-catches ads will eventually swallow a verification code, and it will never
-catch an ad phrased in a way nobody anticipated. JevNoiseGate asks a model
-whether each message is noise instead, and suppresses only what the model
-explicitly flags. **Everything uncertain passes through.**
+## 运行方式
 
----
+需要 JDK 17 和 Android SDK 37。模型不进入 APK，也不提交到仓库，普通构建无需下载模型。本地离线验证文件由 `.gitignore` 排除。
 
-## Design principles
-
-### Fail open
-
-Every uncertain path resolves to `ALLOW` — network failure, missing
-credentials, timeout, HTTP error, a category the model returns that is not in
-the configured answer space. This is enforced in one place (`DecisionMapper`)
-so no call path can bypass it.
-
-The reasoning: leaking one ad costs a moment of annoyance. Swallowing one
-verification code can cost someone an account. The asymmetry is large enough
-that the default has to favour letting things through.
-
-### OTP never leaves the device
-
-A local gate matches verification-code shapes before anything else runs
-(`OtpGate`). On a match the message is allowed and **no request is made at
-all** — not "the request is made but the field is stripped". The diagnostics
-screen reports an upload count so this claim is observable rather than just
-asserted.
-
-### Hard rules stay local
-
-Two mechanisms deliberately do **not** go through the model:
-
-| Mechanism | Behaviour |
-|---|---|
-| SMS sender blacklist | Exact identifier match. Blocks without a network call, so it cannot be defeated by a timeout or an API outage. |
-| OTP gate | Allows without a network call. |
-
-A model is the right tool for "is this an ad". It is the wrong tool for
-"this number is on my list".
-
----
-
-## How it works
-
-```
-notification listener ─┐
-                       ├─→ decision pipeline ─→ action
-SMS receiver ──────────┘
+```powershell
+.\gradlew.bat :app:assembleDebug
+adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Both ingestion paths share one pipeline, so there is no way for notifications
-and SMS to drift apart in behaviour.
+首次使用：
 
-The pipeline runs in a fixed order:
+1. 在事件页点击「下载 / 继续下载模型」。下载约 679 MB 到应用私有目录，显示进度；网络失败后可重试并续传。
+2. 授予「通知使用权」，确认页面显示「监听服务：已连接」。已授权但尚未连接时，可点击「重新连接」请求系统绑定。
+3. 点击「开启降噪」。每次开启前校验全部模型的大小和 SHA-256，确认模型初始化成功、通知使用权存在且监听服务实际连接。
+4. 点击「停止降噪」可立即停止通知及短信采集、拦截。系统监听服务仍由 Android 管理；页面区分系统连接状态和降噪运行状态。
 
-1. **OTP gate** — local, resolves without network
-2. **SMS blacklist** — local, resolves without network
-3. **Model** — everything else, with channel history and user rules attached
-   as structured `state`
+下载使用 Hugging Face HTTPS 地址，固定仓库 revision `058cbf34ed2c6a2854ec60e9534c229d08740387`，并校验固定 SHA-256。只有校验成功的完整文件才安装，未完成文件以 `.part` 保存。服务器不支持 Range 时重新下载当前文件。下载任务随应用进程存活；进程终止后重新打开应用、点击继续下载即可恢复。首次下载需能访问 Hugging Face，失败原因会显示在页面。
 
-The model receives a structured state rather than a bare string:
+开启状态保存在本机。重启后重新校验模型、初始化，只有系统监听重新连接后才恢复处理；模型缺失、损坏或监听断开时暂停，不拦截消息。新安装默认关闭。读取短信为可选权限，仍需用户授权。分类在下载完成后可以离线运行，当前构建包含 `arm64-v8a` 和 `x86_64` 原生库。
 
-```json
-{
-  "source": "notification",
-  "app": "Example",
-  "package": "com.example.app",
-  "channel": "promo",
-  "sender": null,
-  "title": "...",
-  "body": "...",
-  "history": { "seen": 12, "suppressed": 3, "noiseRatio": 0.25 },
-  "userRules": { "preferAllow": ["verification codes"] }
-}
-```
+## 模型与准确率
 
-History matters: a bare body gives the model no way to know that this channel
-has been 90% ads. `userRules` lets a user state preferences in plain language
-("always let verification codes through") which the model weighs rather than
-matches literally.
+Android 推理代码与模型来自 [Laya Multilingual LiteRT](https://huggingface.co/litert-community/Laya-Multilingual-LiteRT)，固定使用 256 token、FP16 权重存储和 CPU 推理。来源、许可与 host contract 保存在 `third_party/laya-litert/`。模型文件不纳入 Git。可选的本地验证文件存放于 `app/src/main/assets/laya/`，由 `.gitignore` 和构建配置排除；运行时模型保存在应用私有目录。
 
----
+上游的 201 条英日文设备校验样本在 Android 模拟器上分类结果全部一致；新增的中文广告短信样张可完成推理并返回「广告」。这些结果只验证运行路径，不能代表中文短信和通知的准确率，也不能代表真机耗时。上线自动拦截前应使用标注的中文样本评估误拦率，并在目标手机上测延迟、内存及耗电。
 
-## Behaviour worth knowing
+主应用的通知链路已在 Android 37 x86_64 模拟器中验证：广告样张返回「广告」(97.39%) 并隔离、撤销通知；验证码由 OTP 闸门放行；中文配送通知返回「正常」并保留。分类门槛使用所选类别的概率，不使用 Laya 的整体熵置信度。当前输入为正文、标题和用户规则；不将应用名、渠道名、历史统计输入模型，避免来源元数据主导正文分类。固定窗口会截断过长的输入。
 
-### Notifications are cancelled *after* the decision
+先前内置模型版本已通过模拟器离线分类和 51 项核心单元测试。在线下载版本增加下载及服务状态测试；应用清单包含用于模型下载的 `INTERNET` 权限。完整公网模型下载尚需在能访问 Hugging Face 的网络上验证。
 
-Android gives `onNotificationPosted` a strict time budget, so the decision
-runs in a coroutine and the notification is revoked once it returns. The
-practical consequence:
+## 项目结构
 
-> A blocked notification is visible in the status bar for the duration of the
-> request, then disappears.
+- `app/`：主界面、模型下载与校验、本地 Laya 后端和启动条件检查。
+- `core/decision/`：分类输入、阈值和动作映射。
+- `core/pipeline/`：验证码闸门与失败放行。
+- `core/dispatch/`：短信、通知共用的判断入口与记录。
+- `feature/notification/`、`feature/sms/`：Android 采集入口。
 
-This is not a bug, but it is not what "block" usually implies either. There is
-no way to decide before the notification appears without blocking the system
-callback.
+当前版本支持本地用户规则和类别门槛调整；不会在手机上训练模型权重。用户纠错驱动的本地个性化仍需独立实现和验证。
 
-### Blocking an SMS only removes its notification
+## 在线下载版本验证（2026-09-28）
 
-Only the default SMS app may delete SMS. JevNoiseGate is not the default SMS
-app and does not intend to become one (that would mean owning the delivery of
-every legitimate message, including verification codes).
-
-So blocking an SMS means revoking the notification its app posted. The message
-**stays in the inbox and the conversation list**. For the common case — an ad
-you glance at and ignore without opening the messaging app — this removes
-essentially all of the interruption, but it is a real limitation.
-
----
-
-## Features
-
-- **Two ingestion paths** — notifications and SMS, one shared pipeline
-- **Local OTP gate** — verification codes are allowed and never uploaded
-- **SMS sender blacklist** — hard rule, evaluated before the model
-- **User rules** — free-text preferences injected into the model state as soft
-  constraints
-- **Per-app listening filter** — opt apps out entirely
-- **Event log** — every message is recorded *before* it is judged, so blocked
-  items remain auditable after they are gone from the status bar. Events are
-  grouped by app, and content is collapsed by default.
-- **Runtime log** — in-app log with level gating, category filters, persisted
-  to disk with rotation, clearable by the user
-- **Network proxy** — HTTP / HTTPS / SOCKS5, with optional authentication
-- **Theming** — Material 3 with materialKolor dynamic color, seven light/dark
-  modes, custom seed colors
-
----
-
-## Modules
-
-```
-core:model        domain types
-core:decision     backend interface, state builder, decision mapping
-core:pipeline     pipeline orchestration (pure Kotlin, JVM-testable)
-core:dispatch     glue between ingestion and pipeline
-core:data         Room entities, DAO, settings storage
-core:fingerprint  message fingerprinting and skeletons
-core:common       cross-cutting utilities (logging, clock, ...)
-
-feature:notification   notification listener
-feature:sms            SMS receiver
-
-app               Compose UI
-```
-
-The TypeSafe client is **not** a module in this repository. It is a Kotlin port
-of [`@typesafe-ai/sdk@0.6.0`](https://github.com/typesafe-ai/typesafe-sdk-js)
-(MIT) that lives in its own repository, `ufec/typesafe-sdk-kotlin`, and is
-consumed as an ordinary dependency via JitPack. Its `LICENSE` and `NOTICE` are
-the attribution required by the upstream licence, and they are preserved there
-rather than here.
-
----
-
-## Getting started
-
-### Requirements
-
-- JDK 17
-- Android SDK 37 (compileSdk), minSdk 29
-- An API key for the backend
-
-### Build
-
-```bash
-./gradlew assembleDebug
-```
-
-### First run
-
-1. Grant notification access (Settings → Notifications → Notification access).
-   The app cannot do this for itself.
-2. Grant SMS permission if you want the SMS path.
-3. Open **Settings → JevAPI**, enter your key, and press **Test connection**.
-   A valid key is required — without one every decision fails open and nothing
-   is ever blocked.
-
-> On some ROMs, reinstalling the APK leaves the notification listener
-> registered but not actually bound, and no notifications reach the app.
-> Toggling notification access off and on again fixes it.
-
----
-
-## Configuration
-
-| Setting | Notes |
-|---|---|
-| API key, base URL, model, timeout | Required for real decisions. The model list can be fetched from the backend. |
-| Network proxy | HTTP / HTTPS / SOCKS5. HTTP and HTTPS map to the same implementation — HTTPS targets tunnel through CONNECT. Changes take effect on next launch. |
-| User rules | Plain-language preferences, injected into the model state. Soft constraints. |
-| SMS blacklist | Numbers, prefix or suffix matched, evaluated before the model. Hard rule. |
-| Per-app filter | Opt an app out of ingestion entirely. |
-| Log level | `OFF` removes all logging overhead. Default `INFO`. |
-
----
-
-## Security notes
-
-**The API key and proxy credentials are stored in plaintext**, in the app's
-private Preferences DataStore. There is no Keystore-backed encryption.
-
-This is a deliberate trade-off — the complexity of Keystore-based
-encryption was judged not worth it for this app — but it has consequences you
-should be aware of:
-
-- On a rooted device, any process with root can read them.
-- They may be included in device backups or extractions.
-- **Do not supply a key you cannot rotate.**
-
-The app's private storage is not readable by other apps on a non-rooted
-device.
-
----
-
-## Status
-
-Early, and developed against a single device. Verified behaviour is limited to
-what has actually been exercised — some paths have unit tests, others have
-only been run by hand. Treat it as a personal tool that happens to be public
-rather than a production product.
-
----
-
-## Licence
-
-The application is released under the MIT Licence — see `LICENSE`.
-
-The TypeSafe client is a port of MIT-licensed upstream work. It is not part of
-this repository: it lives in `ufec/typesafe-sdk-kotlin` and carries its own
-`LICENSE` and `NOTICE` there. Both must be preserved if you redistribute it.
+- Debug / R8 release 构建成功；Release 本地调试签名安装包约 24.66 MB，Debug 约 62.14 MB。APK 内无 `assets/laya/` 文件。
+- 8 项新增测试通过，覆盖完整下载、Range 续传、忽略 Range 时重下、损坏文件拒绝安装、有效文件跳过网络，以及服务启用和运行条件。
+- 模拟器上通过暂时移走模型文件、撤销通知使用权验证开启被拒绝；恢复模型及授权后开启成功，广告测试通知返回「广告」97.39% 并撤销。停止后测试通知保留。
+- 当前电脑连接 Hugging Face 超时，因此未声称完整公网下载已经跑通。下载任务没有前台服务保活；应用进程被系统终止后需回到页面继续下载。

@@ -59,6 +59,7 @@ class NoiseGateNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
         SmsNotificationSuppressor.detach()
         AppLog.i(LogCategory.SYSTEM, TAG) { "通知监听服务已销毁" }
         scope.cancel()
@@ -67,6 +68,7 @@ class NoiseGateNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(true)
         AppLog.i(LogCategory.NOTIFICATION, TAG) { "通知使用权已授予，开始采集与判断" }
         // 短信侧判断完会回调这里来撤销对应的短信通知。
         SmsNotificationSuppressor.attach(::cancelSmsNotification)
@@ -104,11 +106,14 @@ class NoiseGateNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
+        SmsNotificationSuppressor.detach()
         AppLog.w(LogCategory.NOTIFICATION, TAG) { "通知使用权已断开" }
         super.onListenerDisconnected()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        if (!me.ethanxu.jevnoisegate.core.common.ServiceState.running) return
         val notification = sbn ?: return
 
         // 排除自己的通知：回收站提醒之类的自产通知只会污染统计。
@@ -164,7 +169,7 @@ class NoiseGateNotificationListener : NotificationListenerService() {
                 }
 
                 // 只有明确判定为噪音才动手；fail-open 的路径一律是 ALLOW，不会走到这里。
-                if (decision.action != Action.ALLOW) {
+                if (decision.action != Action.ALLOW && me.ethanxu.jevnoisegate.core.common.ServiceState.running) {
                     cancelNotification(notificationKey)
                 }
             } catch (error: Throwable) {

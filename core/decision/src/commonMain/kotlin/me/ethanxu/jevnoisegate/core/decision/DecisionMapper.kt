@@ -10,8 +10,7 @@ import me.ethanxu.jevnoisegate.core.model.FinalDecision
  *
  * **这里是整个系统唯一允许存在"策略"的地方**，而且它完全由配置驱动（阈值来自
  * [me.ethanxu.jevnoisegate.core.model.CategoryConfig.minConfidence]），代码里没有任何
- * "什么算广告"这类判断。TypeSafe 官方文档也把这一步明确划给调用方：
- * "Your code encodes the risk tolerance."
+ * "什么算广告"这类判断由本地模型完成。
  *
  * 同时，**fail-open 在这里落地** —— 所有无法确信的路径一律降级为 [Action.ALLOW]。
  * 集中在一处的好处是它不可能被别的调用路径绕过。
