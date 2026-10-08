@@ -52,8 +52,7 @@ data class AppPreferences(
     /**
      * 代理认证密码。
      *
-     * 与 API key 一样以明文存在应用私有 DataStore 中 —— 本应用没有引入密钥库
-     * （Keystore）加解密的复杂度。这个取舍写在设置页说明里，不隐瞒。
+     * 内存中的明文值。DataStore 持久化使用 Android Keystore 的设备密钥加密。
      */
     val proxyPassword: String = "",
 
@@ -193,9 +192,7 @@ data class AppPreferences(
  * 用来把「已验证」这件事绑定到**具体的那一组值**上：任何一项变了指纹就变，
  * [AppPreferences.isProxyVerified] 随之变假，验证自动作废。
  *
- * **密码纳入指纹**，所以只改密码同样要重测。这不新增暴露面：密码本就以明文
- * 存在同一个 DataStore 文件里（见 [AppPreferences.proxyPassword]），
- * 这里多出来的只是一个摘要。
+ * **密码纳入指纹**，所以只改密码同样要重测。持久化的凭据独立加密，指纹只用于识别配置。
  *
  * 取 SHA-256 的前 8 字节（16 位十六进制）即可。这不是防碰撞的场景，
  * 要的只是一个对配置敏感、又短到能塞进偏好文件的标识。

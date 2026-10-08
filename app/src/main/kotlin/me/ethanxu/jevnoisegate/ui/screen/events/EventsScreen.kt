@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import android.Manifest
 import android.content.Intent
 import android.provider.Settings
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -66,7 +67,23 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val events by viewModel.events.collectAsStateWithLifecycle()
-    val groups by viewModel.eventGroups.collectAsStateWithLifecycle()
+    val recentGroups by viewModel.eventGroups.collectAsStateWithLifecycle()
+    val quarantinedEvents by viewModel.quarantinedEvents.collectAsStateWithLifecycle()
+    val quarantineCount by viewModel.quarantineCount.collectAsStateWithLifecycle()
+    val restoreMessage by viewModel.restoreMessage.collectAsStateWithLifecycle()
+    var quarantineOnly by remember { mutableStateOf(false) }
+    val groups = recentGroups
+    var pendingRestore by remember { mutableStateOf<String?>(null) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) pendingRestore?.let(viewModel::restore)
+        pendingRestore = null
+    }
+    val restore: (String) -> Unit = { id ->
+        if (Build.VERSION.SDK_INT >= 33) {
+            pendingRestore = id
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else viewModel.restore(id)
+    }
     val total by viewModel.totalCount.collectAsStateWithLifecycle()
 
     // 用户会离开 App 去设置页授权，因此每次回到前台都重新读取权限状态。
@@ -100,16 +117,25 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
                 onOpenNotificationSettings = {
                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 },
-                onRequestSms = { smsPermissionLauncher.launch(Manifest.permission.READ_SMS) },
+                onRequestSms = { smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS) },
             )
         }
 
         item { CollectedCard(total = total) }
+        item {
+            Row {
+                TextButton(onClick = { quarantineOnly = false }) { Text(if (!quarantineOnly) "全部事件 ✓" else "全部事件") }
+                TextButton(onClick = { quarantineOnly = true }) { Text(if (quarantineOnly) "隔离区 ✓" else "隔离区") }
+            }
+            Text("记录保留 30 天，最多 10,000 条。恢复会重新提示保存的文本并放行相同完整内容。",
+                style = MaterialTheme.typography.bodySmall)
+            restoreMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "最近事件 · ${groups.size} 个应用 / ${events.size} 条",
+                    text = if (quarantineOnly) "隔离区 · $quarantineCount 条" else "最近事件 · ${groups.size} 个应用 / ${events.size} 条",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -117,7 +143,20 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
             }
         }
 
-        if (groups.isEmpty()) {
+        if (quarantineOnly) {
+            items(quarantinedEvents, key = { it.id }) { event ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(event.appLabel ?: event.packageName, style = MaterialTheme.typography.titleSmall)
+                        EventDetail(event, restore)
+                    }
+                }
+            }
+            if (quarantinedEvents.size < quarantineCount) {
+                item { TextButton(onClick = viewModel::loadMoreQuarantined) { Text("加载更多隔离消息") } }
+            }
+            if (quarantineCount == 0) item { Text("隔离区为空") }
+        } else if (groups.isEmpty()) {
             item { EmptyHint(notificationAccess = notificationAccess) }
         } else {
             // 按包名分组：组间是"最近活跃优先"，组内时间倒序。
@@ -125,6 +164,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
                 SwipeToDeleteGroup(
                     group = group,
                     onDelete = { viewModel.deleteApp(group.packageName) },
+                    onRestore = restore,
                 )
             }
         }
@@ -141,7 +181,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit) {
+private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit, onRestore: (String) -> Unit) {
     val state = rememberSwipeToDismissBoxState()
 
     // 用 LaunchedEffect 而不是 confirmValueChange 回调里直接删：
@@ -175,7 +215,7 @@ private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit) {
             }
         },
     ) {
-        AppGroupCard(group)
+        AppGroupCard(group, onRestore)
     }
 }
 
@@ -186,7 +226,7 @@ private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit) {
  * 所以默认视图必须足够短；想看全部再手动展开。
  */
 @Composable
-private fun AppGroupCard(group: AppEventGroup) {
+private fun AppGroupCard(group: AppEventGroup, onRestore: (String) -> Unit) {
     var expanded by remember(group.packageName) { mutableStateOf(false) }
     val icon = rememberAppIcon(group.packageName)
 
@@ -243,7 +283,7 @@ private fun AppGroupCard(group: AppEventGroup) {
                     modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                EventDetail(entity)
+                EventDetail(entity, onRestore)
             }
 
             if (hidden > 0 || expanded) {
@@ -301,7 +341,7 @@ private fun PermissionCard(
             )
             Spacer(Modifier.height(8.dp))
             PermissionRow(
-                label = "读取短信",
+                label = "接收短信",
                 granted = smsGranted,
                 required = false,
                 actionLabel = if (smsGranted) "已授权" else "授权",
@@ -362,7 +402,7 @@ private fun CollectedCard(total: Int) {
 }
 
 @Composable
-private fun EventDetail(entity: MessageEventEntity) {
+private fun EventDetail(entity: MessageEventEntity, onRestore: (String) -> Unit) {
     // 内容默认折叠 —— 事件页是"看判断结果"的地方，不是"读消息"的地方。
     // 默认展开意味着任何一次截屏都会把通知/短信正文一起带走。
     var revealed by remember(entity.id) { mutableStateOf(false) }
@@ -456,6 +496,9 @@ private fun EventDetail(entity: MessageEventEntity) {
         )
 
         DecisionLine(entity)
+        if (entity.action == "QUARANTINE") {
+            TextButton(onClick = { onRestore(entity.id) }) { Text("恢复并放行相同内容") }
+        }
     }
 }
 

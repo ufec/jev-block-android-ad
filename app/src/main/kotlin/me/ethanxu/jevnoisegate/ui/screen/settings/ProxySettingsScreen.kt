@@ -74,7 +74,9 @@ fun ProxySettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var proxyUsername by remember { mutableStateOf("") }
     var proxyPassword by remember { mutableStateOf("") }
 
-    LaunchedEffect(prefs) {
+    LaunchedEffect(Unit) {
+        viewModel.awaitReady()
+        val prefs = viewModel.preferences.value
         if (!initialized) {
             proxyType = prefs.proxyType
             proxyHost = prefs.proxyHost
@@ -84,6 +86,8 @@ fun ProxySettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             initialized = true
         }
     }
+
+    if (!initialized) { Text("正在读取设置…"); return }
 
     val enabled = proxyType != AppPreferences.PROXY_NONE
     val hostError = proxyHostError(proxyHost)
@@ -314,8 +318,7 @@ fun ProxySettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                                     "字段只是草稿，不保存就什么都不会变。\n\n" +
                                     "保存会先测这条链路，通过才写入；不通过则完全不写入，" +
                                     "应用仍按原来那套配置走。这样一次改错的尝试不会破坏手上能用的配置。\n\n" +
-                                    "保存成功后需要重启应用才对实际判断生效 —— " +
-                                    "HTTP 客户端在启动时按当时的配置构建，之后不会重建。\n\n" +
+                                    "保存成功后，下一次判断就使用新配置。\n\n" +
                                     "地址格式：主机填 IP 或域名（192.168.31.1、proxy.corp.internal、::1），" +
                                     "端口填 1–65535。这里不查 DNS —— 域名能不能解析要等真正连接才知道，" +
                                     "在设置页解析一次既慢，又可能因为当前网络不通而误报。\n\n" +
@@ -327,9 +330,8 @@ fun ProxySettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                                     "分开列出只是为了对齐常见叫法。\n\n" +
                                     "SOCKS5 不支持用户名/密码认证，这与 SDK 的能力边界一致 —— " +
                                     "它的 SOCKS 入口只有主机和端口两个参数。\n\n" +
-                                    "密码以明文保存在应用私有的 DataStore 里，与 API Key 同样处理，" +
-                                    "本应用没有引入密钥库加解密。设备已 root、或有人能读取应用私有目录时，" +
-                                    "这个密码就是可读的，请据此决定要不要在代理上使用重要口令。",
+                                    "密码与 API Key 使用 Android Keystore 的设备密钥加密保存，" +
+                                    "应用数据不参与系统备份和设备迁移。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(16.dp),

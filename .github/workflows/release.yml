@@ -100,9 +100,9 @@ jobs:
           for attempt in 1 2 3; do
             echo "::group::dependency resolution, attempt ${attempt}"
             if [ "$attempt" -eq 1 ]; then
-              ./gradlew :app:dependencies --configuration releaseRuntimeClasspath --console=plain
+              ./gradlew :app:resolveReleaseDependencies --console=plain
             else
-              ./gradlew :app:dependencies --configuration releaseRuntimeClasspath --console=plain --refresh-dependencies
+              ./gradlew :app:resolveReleaseDependencies --console=plain --refresh-dependencies
             fi
             status=$?
             echo "::endgroup::"
@@ -116,7 +116,7 @@ jobs:
           exit 1
 
       - name: Run the unit tests
-        run: ./gradlew :app:testDebugUnitTest --console=plain
+        run: ./gradlew verify --console=plain
 
       - name: Assemble the release APK
         run: ./gradlew :app:assembleRelease --console=plain

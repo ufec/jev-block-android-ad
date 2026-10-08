@@ -19,3 +19,11 @@ plugins {
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.hilt) apply false
 }
+
+tasks.register("verify") {
+    group = "verification"
+    description = "Run every module's host/unit tests and dependency-aware Android lint."
+    dependsOn(listOf("common", "model", "fingerprint", "decision", "pipeline").map { ":core:$it:testAndroidHostTest" })
+    dependsOn(":core:data:testDebugUnitTest", ":core:dispatch:testDebugUnitTest",
+        ":feature:notification:testDebugUnitTest", ":feature:sms:testDebugUnitTest", ":app:testDebugUnitTest", ":app:lintDebug")
+}

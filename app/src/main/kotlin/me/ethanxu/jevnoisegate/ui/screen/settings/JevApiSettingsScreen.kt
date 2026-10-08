@@ -44,6 +44,7 @@ import me.ethanxu.jevnoisegate.app.SettingsViewModel
 import me.ethanxu.jevnoisegate.ui.component.AppIcons
 import me.ethanxu.jevnoisegate.app.proxyStatus
 import me.ethanxu.jevnoisegate.core.data.settings.AppPreferences
+import me.ethanxu.jevnoisegate.core.data.settings.isValidBaseUrl
 import me.ethanxu.jevnoisegate.ui.component.SegmentedColumn
 import me.ethanxu.jevnoisegate.ui.component.SegmentedField
 import me.ethanxu.jevnoisegate.ui.component.SegmentedItemContainer
@@ -74,7 +75,9 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var timeout by remember { mutableStateOf("") }
     var keyVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(prefs) {
+    LaunchedEffect(Unit) {
+        viewModel.awaitReady()
+        val prefs = viewModel.preferences.value
         if (!initialized) {
             apiKey = prefs.apiKey
             baseUrl = prefs.baseUrl
@@ -83,6 +86,8 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             initialized = true
         }
     }
+
+    if (!initialized) { Text("正在读取设置…"); return }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -159,10 +164,13 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         value = baseUrl,
                         onValueChange = {
                             baseUrl = it
-                            viewModel.setBaseUrl(it.trim())
+                            if (isValidBaseUrl(it.trim())) viewModel.setBaseUrl(it.trim())
                         },
                         label = "Base URL",
                     )
+                    if (!isValidBaseUrl(baseUrl.trim())) {
+                        Text("请填写有效的 HTTP(S) 地址；当前输入尚未保存", color = MaterialTheme.colorScheme.error)
+                    }
                 }
                 item {
                     SegmentedModelField(
@@ -260,7 +268,7 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                                 "代理的验证在「网络代理」页完成。\n\n" +
                                 "请求的是 GET /v1/models —— 它同时也是模型列表接口，" +
                                 "所以一次请求既验证了连通性，又把可选模型取回来。\n\n" +
-                                "修改配置后需要重启应用才会对实际判断生效。",
+                                "保存的配置对下一次判断生效。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(16.dp),
@@ -278,8 +286,7 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             text = "默认 Base URL 为 ${AppPreferences.DEFAULT_BASE_URL}，" +
                                 "模型 ${AppPreferences.DEFAULT_MODEL}，" +
                                 "超时 ${AppPreferences.DEFAULT_TIMEOUT_MS} 毫秒。\n\n" +
-                                "超时是单次请求的时限。SDK 默认还会重试 2 次，" +
-                                "因此最坏情况下一条通知会占用约三倍的时间加退避。",
+                                "超时是单次请求的时限。一次判断（含等待与重试）的总上限为 15 秒，超时会放行。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(16.dp),

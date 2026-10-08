@@ -17,6 +17,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.ethanxu.jevnoisegate.core.common.log.AppLog
 
 /**
@@ -41,14 +47,15 @@ interface SettingsRepository {
     val preferences: StateFlow<AppPreferences>
 
     /**
-     * 阻塞至首次从磁盘加载完成。
+     * 挂起至首次加载完成或失败，不阻塞主线程。加载有五秒总时限。
      *
      * 存在的理由：内存 StateFlow 的初值是默认值，而真实配置要等一次磁盘读取。
      * 任何**在启动阶段就需要读到真实配置**的下游（构造 HTTP 客户端、初始化日志等级）
      * 必须先调用它，否则会静默按默认值工作 —— 表现为"用户配了 API key 但请求打到了默认地址"，
      * 而且不报错，极难排查。
      */
-    fun awaitReady()
+    suspend fun awaitReady()
+    val persistenceError: StateFlow<String?>
 
     suspend fun setUiMode(value: String)
     suspend fun setColorMode(value: Int)
@@ -121,6 +128,8 @@ interface SettingsRepository {
 
 internal class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
+    private val secrets: SecretCodec,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SettingsRepository {
 
     /** 界面看到的唯一真相源。进程内单例，因此全局一致。 */
@@ -128,146 +137,154 @@ internal class DataStoreSettingsRepository(
 
     override val preferences: StateFlow<AppPreferences> = inMemory.asStateFlow()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     /** 首次加载完成信号，供 [awaitReady] 使用。 */
-    private val ready = java.util.concurrent.CountDownLatch(1)
+    private val ready = CompletableDeferred<Unit>()
+    private val memoryLock = Any()
+    private val reloadLock = Mutex()
+    @Volatile private var loaded = false
+    private val error = MutableStateFlow<String?>(null)
+    override val persistenceError: StateFlow<String?> = error.asStateFlow()
+    private data class Write(val snapshot: AppPreferences, val done: CompletableDeferred<Unit>)
+    private val writes = Channel<Write>(Channel.UNLIMITED)
 
     init {
         // 启动时从磁盘载入一次。之后内存是权威，磁盘只是持久化副本。
         scope.launch {
-            val loaded = dataStore.data.first().toAppPreferences()
-            inMemory.value = loaded
-            // 日志等级必须在任何业务代码产出日志之前生效，否则启动早期的日志会漏记。
-            AppLog.configure(loaded.logLevel)
-            ready.countDown()
+            try {
+                withTimeoutOrNull(5_000L) {
+                    val stored = dataStore.data.first()
+                    inMemory.value = stored.toAppPreferences(secrets)
+                    loaded = true
+                    // The deadline includes migration so a stalled write cannot delay readiness.
+                    val secretKeys = listOf(Keys.API_KEY, Keys.PROXY_USERNAME, Keys.PROXY_PASSWORD)
+                    if (secretKeys.any { stored[it].orEmpty().let { value ->
+                            value.isNotEmpty() && !value.startsWith(AndroidSecretCodec.PREFIX) } }) {
+                        dataStore.edit { values ->
+                            secretKeys.forEach { key ->
+                                val value = values[key].orEmpty()
+                                if (value.isNotEmpty() && !value.startsWith(AndroidSecretCodec.PREFIX)) values[key] = secrets.encrypt(value)
+                            }
+                        }
+                    }
+                } ?: throw java.io.IOException("Settings load timed out")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error.value = "设置加载或迁移失败，请检查当前配置：${failure::class.java.simpleName}"
+            } finally {
+                AppLog.configure(inMemory.value.logLevel)
+                ready.complete(Unit)
+            }
+            for (write in writes) {
+                try {
+                    dataStore.edit { persistSnapshot(it, write.snapshot) }
+                    error.value = null
+                    write.done.complete(Unit)
+                } catch (cancelled: CancellationException) {
+                    write.done.cancel(cancelled)
+                    throw cancelled
+                } catch (failure: Exception) {
+                    error.value = "设置保存失败，重启后可能丢失改动：${failure::class.java.simpleName}"
+                    write.done.completeExceptionally(failure)
+                }
+            }
         }
     }
 
-    override fun awaitReady() {
+    override suspend fun awaitReady() {
         ready.await()
     }
 
-    override suspend fun setUiMode(value: String) = mutate({ it.copy(uiMode = value) }) {
-        it[Keys.UI_MODE] = value
+    override suspend fun setUiMode(value: String) = mutate { it.copy(uiMode = value) }
+    override suspend fun setColorMode(value: Int) = mutate { it.copy(colorMode = value) }
+    override suspend fun setKeyColor(value: Int) = mutate { it.copy(keyColor = value) }
+    override suspend fun setApiKey(value: String) = mutate { it.copy(apiKey = value) }
+    override suspend fun setBaseUrl(value: String) {
+        require(isValidBaseUrl(value)) { "Base URL 必须是有效的 HTTP(S) 地址" }
+        mutate { it.copy(baseUrl = value) }
     }
-
-    override suspend fun setColorMode(value: Int) = mutate({ it.copy(colorMode = value) }) {
-        it[Keys.COLOR_MODE] = value
+    override suspend fun setModel(value: String) = mutate { it.copy(model = value) }
+    override suspend fun setTimeoutMs(value: Long) = mutate { it.copy(timeoutMs = value.coerceIn(1_000L, 60_000L)) }
+    override suspend fun setAppMuted(packageName: String, muted: Boolean) = mutate {
+        it.copy(mutedPackages = if (muted) it.mutedPackages + packageName else it.mutedPackages - packageName)
     }
-
-    override suspend fun setKeyColor(value: Int) = mutate({ it.copy(keyColor = value) }) {
-        it[Keys.KEY_COLOR] = value
+    override suspend fun setLogLevel(value: Int) = mutate { it.copy(logLevel = value) }
+    override suspend fun saveProxyConfig(type: String, host: String, port: Int, username: String, password: String) = mutate {
+        it.copy(proxyType = type, proxyHost = host, proxyPort = port,
+            proxyUsername = username, proxyPassword = password,
+            proxyVerifiedFingerprint = proxyFingerprint(type, host, port, username, password))
     }
-
-    override suspend fun setApiKey(value: String) = mutate({ it.copy(apiKey = value) }) {
-        it[Keys.API_KEY] = value
-    }
-
-    override suspend fun setBaseUrl(value: String) = mutate({ it.copy(baseUrl = value) }) {
-        it[Keys.BASE_URL] = value
-    }
-
-    override suspend fun setModel(value: String) = mutate({ it.copy(model = value) }) {
-        it[Keys.MODEL] = value
-    }
-
-    override suspend fun setTimeoutMs(value: Long) = mutate({ it.copy(timeoutMs = value) }) {
-        it[Keys.TIMEOUT_MS] = value
-    }
-
-    override suspend fun setAppMuted(packageName: String, muted: Boolean) {
-        val current = inMemory.value.mutedPackages
-        mutate({ it.copy(mutedPackages = if (muted) current + packageName else current - packageName) }) {
-            it[Keys.MUTED_PACKAGES] = if (muted) current + packageName else current - packageName
-        }
-    }
-
-    override suspend fun setLogLevel(value: Int) {
-        // 先让等级立即生效，再落盘 —— 否则用户在设置里调完等级，
-        // 到落盘完成之前的日志仍然按旧等级过滤。
-        AppLog.configure(value)
-        mutate({ it.copy(logLevel = value) }) { it[Keys.LOG_LEVEL] = value }
-    }
-
-    override suspend fun saveProxyConfig(
-        type: String,
-        host: String,
-        port: Int,
-        username: String,
-        password: String,
-    ) {
-        val fingerprint = proxyFingerprint(type, host, port, username, password)
-        mutate(
-            updateMemory = {
-                it.copy(
-                    proxyType = type,
-                    proxyHost = host,
-                    proxyPort = port,
-                    proxyUsername = username,
-                    proxyPassword = password,
-                    proxyVerifiedFingerprint = fingerprint,
-                )
-            },
-            updateDisk = {
-                it[Keys.PROXY_TYPE] = type
-                it[Keys.PROXY_HOST] = host
-                it[Keys.PROXY_PORT] = port
-                it[Keys.PROXY_USERNAME] = username
-                it[Keys.PROXY_PASSWORD] = password
-                it[Keys.PROXY_VERIFIED_FINGERPRINT] = fingerprint
-            },
-        )
-    }
-
-    override suspend fun setPreferAllowRules(value: List<String>) =
-        mutate({ it.copy(preferAllowRules = value) }) { it[Keys.PREFER_ALLOW] = value.joinToString("\n") }
-
-    override suspend fun setPreferBlockRules(value: List<String>) =
-        mutate({ it.copy(preferBlockRules = value) }) { it[Keys.PREFER_BLOCK] = value.joinToString("\n") }
-
-    override suspend fun setSmsSenderBlacklist(value: List<String>) =
-        mutate({ it.copy(smsSenderBlacklist = value) }) { it[Keys.SMS_BLACKLIST] = value.joinToString("\n") }
-
-    override suspend fun setDeveloperMode(value: Boolean) =
-        mutate({ it.copy(developerMode = value) }) { it[Keys.DEVELOPER_MODE] = value }
-
+    override suspend fun setPreferAllowRules(value: List<String>) = mutate { it.copy(preferAllowRules = value.toList()) }
+    override suspend fun setPreferBlockRules(value: List<String>) = mutate { it.copy(preferBlockRules = value.toList()) }
+    override suspend fun setSmsSenderBlacklist(value: List<String>) = mutate { it.copy(smsSenderBlacklist = value.toList()) }
+    override suspend fun setDeveloperMode(value: Boolean) = mutate { it.copy(developerMode = value) }
     override suspend fun setCategoryThreshold(name: String, value: Float) {
-        val next = inMemory.value.categoryThresholds + (name to value.coerceIn(0f, 1f))
-        mutate({ it.copy(categoryThresholds = next) }) {
-            it[Keys.CATEGORY_THRESHOLDS] = encodeOverrides(next)
-        }
+        require(value.isFinite()) { "判定门槛必须是有限数" }
+        mutate { it.copy(categoryThresholds = it.categoryThresholds + (name to value.coerceIn(0f, 1f))) }
+    }
+    override suspend fun setCategoryAction(name: String, value: String) = mutate {
+        it.copy(categoryActions = it.categoryActions + (name to value))
+    }
+    override suspend fun resetCategoryOverrides() = mutate {
+        it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap())
     }
 
-    override suspend fun setCategoryAction(name: String, value: String) {
-        val next = inMemory.value.categoryActions + (name to value)
-        mutate({ it.copy(categoryActions = next) }) {
-            it[Keys.CATEGORY_ACTIONS] = encodeOverrides(next)
+    /** Memory update and enqueue are atomic; a single process-owned writer persists snapshots. */
+    private suspend fun mutate(updateMemory: (AppPreferences) -> AppPreferences) {
+        ready.await()
+        ensureLoaded()
+        val done = CompletableDeferred<Unit>()
+        synchronized(memoryLock) {
+            inMemory.update(updateMemory)
+            AppLog.configure(inMemory.value.logLevel)
+            check(writes.trySend(Write(inMemory.value, done)).isSuccess)
         }
+        done.await()
     }
 
-    override suspend fun resetCategoryOverrides() {
-        mutate({ it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap()) }) {
-            // remove 而不是写空串：两者解析出来都是空 map，但 remove 让 DataStore 里
-            // 不再留下这两个键，文件状态与"从未改过"完全一致。
-            it.remove(Keys.CATEGORY_THRESHOLDS)
-            it.remove(Keys.CATEGORY_ACTIONS)
+    /** Never overwrite unread settings with the temporary defaults shown after a load failure. */
+    private suspend fun ensureLoaded() {
+        if (loaded) return
+        reloadLock.withLock {
+            if (loaded) return@withLock
+            try {
+                val recovered = withTimeoutOrNull(5_000L) { dataStore.data.first().toAppPreferences(secrets) }
+                    ?: throw java.io.IOException("Settings reload timed out")
+                synchronized(memoryLock) {
+                    inMemory.value = recovered
+                    AppLog.configure(recovered.logLevel)
+                    loaded = true
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error.value = "设置尚未读出，未保存改动以保护原配置：${failure::class.java.simpleName}"
+                throw failure
+            }
         }
     }
-
-    /**
-     * 先更新内存（让界面立即反映），再异步落盘。
-     *
-     * 顺序不可颠倒：先落盘就意味着界面要等磁盘。
-     * 落盘放在 `scope`（进程级）而不是调用方的 `viewModelScope`，
-     * 避免用户快速退出界面时写入被取消。
-     */
-    private inline fun mutate(
-        crossinline updateMemory: (AppPreferences) -> AppPreferences,
-        crossinline updateDisk: (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
-    ) {
-        inMemory.update(updateMemory)
-        scope.launch { dataStore.edit { updateDisk(it) } }
+    private fun persistSnapshot(values: androidx.datastore.preferences.core.MutablePreferences, prefs: AppPreferences) {
+        values[Keys.UI_MODE] = prefs.uiMode
+        values[Keys.COLOR_MODE] = prefs.colorMode
+        values[Keys.KEY_COLOR] = prefs.keyColor
+        values[Keys.API_KEY] = secrets.encrypt(prefs.apiKey)
+        values[Keys.BASE_URL] = prefs.baseUrl
+        values[Keys.MODEL] = prefs.model
+        values[Keys.TIMEOUT_MS] = prefs.timeoutMs
+        values[Keys.MUTED_PACKAGES] = prefs.mutedPackages
+        values[Keys.LOG_LEVEL] = prefs.logLevel
+        values[Keys.PROXY_TYPE] = prefs.proxyType
+        values[Keys.PROXY_HOST] = prefs.proxyHost
+        values[Keys.PROXY_PORT] = prefs.proxyPort
+        values[Keys.PROXY_USERNAME] = secrets.encrypt(prefs.proxyUsername)
+        values[Keys.PROXY_PASSWORD] = secrets.encrypt(prefs.proxyPassword)
+        values[Keys.PROXY_VERIFIED_FINGERPRINT] = prefs.proxyVerifiedFingerprint
+        values[Keys.PREFER_ALLOW] = prefs.preferAllowRules.joinToString("\n")
+        values[Keys.PREFER_BLOCK] = prefs.preferBlockRules.joinToString("\n")
+        values[Keys.SMS_BLACKLIST] = prefs.smsSenderBlacklist.joinToString("\n")
+        values[Keys.DEVELOPER_MODE] = prefs.developerMode
+        values[Keys.CATEGORY_THRESHOLDS] = encodeOverrides(prefs.categoryThresholds)
+        values[Keys.CATEGORY_ACTIONS] = encodeOverrides(prefs.categoryActions)
     }
 
     private object Keys {
@@ -300,23 +317,23 @@ internal class DataStoreSettingsRepository(
     }
 }
 
-private fun Preferences.toAppPreferences(): AppPreferences {
+private fun Preferences.toAppPreferences(secrets: SecretCodec): AppPreferences {
     val defaults = AppPreferences()
     return AppPreferences(
         uiMode = this[stringPreferencesKey("ui_mode")] ?: defaults.uiMode,
         colorMode = this[intPreferencesKey("color_mode")] ?: defaults.colorMode,
         keyColor = this[intPreferencesKey("key_color")] ?: defaults.keyColor,
-        apiKey = this[stringPreferencesKey("api_key")] ?: defaults.apiKey,
-        baseUrl = this[stringPreferencesKey("base_url")] ?: defaults.baseUrl,
+        apiKey = secrets.decrypt(this[stringPreferencesKey("api_key")] ?: defaults.apiKey),
+        baseUrl = this[stringPreferencesKey("base_url")]?.takeIf(::isValidBaseUrl) ?: defaults.baseUrl,
         model = this[stringPreferencesKey("model")] ?: defaults.model,
-        timeoutMs = this[longPreferencesKey("timeout_ms")] ?: defaults.timeoutMs,
+        timeoutMs = this[longPreferencesKey("timeout_ms")]?.coerceIn(1_000L, 60_000L) ?: defaults.timeoutMs,
         mutedPackages = this[stringSetPreferencesKey("muted_packages")] ?: defaults.mutedPackages,
         logLevel = this[intPreferencesKey("log_level")] ?: defaults.logLevel,
         proxyType = this[stringPreferencesKey("proxy_type")] ?: defaults.proxyType,
         proxyHost = this[stringPreferencesKey("proxy_host")] ?: defaults.proxyHost,
         proxyPort = this[intPreferencesKey("proxy_port")] ?: defaults.proxyPort,
-        proxyUsername = this[stringPreferencesKey("proxy_username")] ?: defaults.proxyUsername,
-        proxyPassword = this[stringPreferencesKey("proxy_password")] ?: defaults.proxyPassword,
+        proxyUsername = secrets.decrypt(this[stringPreferencesKey("proxy_username")] ?: defaults.proxyUsername),
+        proxyPassword = secrets.decrypt(this[stringPreferencesKey("proxy_password")] ?: defaults.proxyPassword),
         proxyVerifiedFingerprint = this[stringPreferencesKey("proxy_verified_fingerprint")]
             ?: defaults.proxyVerifiedFingerprint,
         preferAllowRules = parseRules(this[stringPreferencesKey("prefer_allow_rules")]),
@@ -327,7 +344,7 @@ private fun Preferences.toAppPreferences(): AppPreferences {
         // （NaN 参与的比较恒为 false，会让该类别永远走不到"执行动作"那一步），
         // 不如退回出厂默认。
         categoryThresholds = parseOverrides(this[stringPreferencesKey("category_thresholds")])
-            .mapNotNull { (name, raw) -> raw.toFloatOrNull()?.let { name to it.coerceIn(0f, 1f) } }
+            .mapNotNull { (name, raw) -> raw.toFloatOrNull()?.takeIf { it.isFinite() }?.let { name to it.coerceIn(0f, 1f) } }
             .toMap(),
         categoryActions = parseOverrides(this[stringPreferencesKey("category_actions")]),
     )

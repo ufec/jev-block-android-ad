@@ -1,0 +1,21 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v4
+      - run: sdkmanager --install 'platforms;android-37.0' 'build-tools;36.0.0'
+      - run: ./gradlew verify :app:assembleDebug --console=plain

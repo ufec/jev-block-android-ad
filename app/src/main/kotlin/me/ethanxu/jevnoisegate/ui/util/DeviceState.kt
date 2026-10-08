@@ -17,7 +17,7 @@ fun Context.hasNotificationAccess(): Boolean =
 
 /** 是否已授予读取短信权限。非硬依赖，缺失时功能降级。 */
 fun Context.hasSmsPermission(): Boolean =
-    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) ==
+    ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) ==
         PackageManager.PERMISSION_GRANTED
 
 private val TIME_FORMATTER: DateTimeFormatter =

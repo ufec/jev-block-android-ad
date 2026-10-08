@@ -1,4 +1,6 @@
 package me.ethanxu.jevnoisegate.ui.screen.settings
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,12 +32,14 @@ import me.ethanxu.jevnoisegate.ui.theme.ColorMode
 fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     val navigator = LocalNavigator.current
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val persistenceError by viewModel.persistenceError.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+        persistenceError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
         item {
             SegmentedColumn(title = "外观") {
                 item {

@@ -8,16 +8,22 @@ import me.ethanxu.jevnoisegate.core.decision.DecisionMapper
 import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.model.DecidedBy
 import me.ethanxu.jevnoisegate.core.model.FinalDecision
+import me.ethanxu.jevnoisegate.core.model.EventSource
+import me.ethanxu.jevnoisegate.core.model.FailureReason
+import me.ethanxu.jevnoisegate.core.decision.SmsBlacklist
+import me.ethanxu.jevnoisegate.core.decision.BackendOutcome
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 一次判断的结果，连同"是否真的发送到了外部 API"。
- *
- * [uploaded] 是刻意暴露的：隐私承诺（验证码永不上送）必须是可断言、可观测的，
- * 而不是只写在文档里。诊断页据此统计"实际上送率"。
+ * 一次判断的结果，连同是否调用过后端。
+ * [backendAttempted] 不代表请求已发送或服务端已接收；本地放行与黑名单路径恒为 false。
  */
 data class PipelineResult(
     val decision: FinalDecision,
-    val uploaded: Boolean,
+    val backendAttempted: Boolean,
 )
 
 /**
@@ -33,30 +39,51 @@ data class PipelineResult(
 class MessagePipeline(
     private val backend: DecisionBackend,
     private val clock: Clock = SystemClock,
+    private val deadlineMs: Long = 15_000L,
+    maxConcurrentRequests: Int = 4,
 ) {
+    private val requests = Semaphore(maxConcurrentRequests)
+
+    /** Local policy is shared by SMS broadcasts, workers and notifications. */
+    fun localDecision(input: DecisionInput): PipelineResult? {
+        val by = when {
+            OtpGate.isOtpLike(input.event.body, input.event.title) -> DecidedBy.OTP_GATE
+            input.userAllowed -> DecidedBy.USER
+            input.event.source == EventSource.SMS &&
+                SmsBlacklist.matches(input.event.senderKey, input.smsSenderBlacklist) -> DecidedBy.BLACKLIST
+            else -> return null
+        }
+        return PipelineResult(
+            FinalDecision(input.event, if (by == DecidedBy.BLACKLIST) Action.SILENT_SUPPRESS else Action.ALLOW, by),
+            backendAttempted = false,
+        )
+    }
 
     suspend fun process(input: DecisionInput): PipelineResult {
         // ① OTP 闸门 —— 命中即放行，且请求根本不会发出去。
-        if (OtpGate.isOtpLike(input.event.body)) {
-            return PipelineResult(
-                decision = FinalDecision(
-                    event = input.event,
-                    action = Action.ALLOW,
-                    decidedBy = DecidedBy.OTP_GATE,
-                ),
-                uploaded = false,
-            )
-        }
+        localDecision(input)?.let { return it }
 
         // ② 交给后端。只在这一段计时 —— 它才是"能否跑赢震动"所关心的那个数字。
         val startedAt = clock.nowMillis()
-        val outcome = backend.decide(input)
+        var attempted = false
+        val outcome = withTimeoutOrNull(deadlineMs) {
+            requests.withPermit {
+                attempted = true
+                try {
+                    backend.decide(input)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    BackendOutcome.Failed(FailureReason.INVALID_RESPONSE, error.message)
+                }
+            }
+        } ?: BackendOutcome.Failed(FailureReason.TIMEOUT)
         val elapsed = clock.nowMillis() - startedAt
 
         // ③ 映射为动作。fail-open 在这里落地，所有不确定路径一律放行。
         return PipelineResult(
             decision = DecisionMapper.map(input, outcome, elapsed),
-            uploaded = true,
+            backendAttempted = attempted,
         )
     }
 }

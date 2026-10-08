@@ -23,6 +23,6 @@ fun applyCategoryOverrides(
         action = actions[config.name]
             ?.let { name -> Action.entries.firstOrNull { it.name == name } }
             ?: config.action,
-        minConfidence = thresholds[config.name]?.coerceIn(0f, 1f) ?: config.minConfidence,
+        minConfidence = thresholds[config.name]?.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: config.minConfidence,
     )
 }

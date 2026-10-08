@@ -27,16 +27,18 @@ android {
         applicationId = "me.ethanxu.jevnoisegate"
         minSdk = 29
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
 
-        buildConfigField("String", "TYPESAFE_API_KEY", "\"$typesafeApiKey\"")
+        // Public release artifacts never bundle the developer's local credential.
+        buildConfigField("String", "TYPESAFE_API_KEY", "\"\"")
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
     }
+    lint { checkDependencies = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -44,6 +46,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            val escapedKey = typesafeApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r")
+            buildConfigField("String", "TYPESAFE_API_KEY", "\"$escapedKey\"")
+        }
         release {
             // 开 R8 与资源裁剪。不开的话这个包是 51 MiB —— 因为 material-icons-extended
             // 那类"库里绝大多数代码用不到"的依赖会原样进包（详细账见 AppIcons.kt 的注释）。
@@ -56,6 +63,10 @@ android {
             )
         }
     }
+}
+
+tasks.register("resolveReleaseDependencies") {
+    doLast { configurations.getByName("releaseRuntimeClasspath").resolve() }
 }
 
 kotlin {
@@ -100,6 +111,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.hilt.android)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
     ksp(libs.hilt.compiler)
 
     debugImplementation(libs.androidx.compose.ui.tooling)

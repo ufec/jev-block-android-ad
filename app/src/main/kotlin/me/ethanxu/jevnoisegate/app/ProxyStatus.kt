@@ -57,7 +57,7 @@ internal fun proxyStatus(prefs: AppPreferences): ProxyStatus {
         summary = "$endpoint · 已验证",
         // 说的是"这组配置通过过测试"，不是"现在一定通"。验证不会过期，代理却可能在
         // 验证之后失效 —— 不把话说过头，用户才不会在代理已经挂掉时反而更困惑。
-        detail = "该配置已通过测试：经 $endpointWithAuth 出网；重启应用后对实际判断生效",
+        detail = "该配置已通过测试：经 $endpointWithAuth 出网；下一次判断生效",
         isWarning = false,
     )
 }

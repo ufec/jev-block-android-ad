@@ -49,7 +49,7 @@ fun DiagnosticsScreen(
     val devMode = prefs.developerMode
     val latency by viewModel.latencyStats.collectAsStateWithLifecycle()
     val actionCounts by viewModel.actionCounts.collectAsStateWithLifecycle()
-    val uploaded by viewModel.uploadedCount.collectAsStateWithLifecycle()
+    val attempted by viewModel.backendAttemptCount.collectAsStateWithLifecycle()
     val total by viewModel.totalCount.collectAsStateWithLifecycle()
 
     LazyColumn(
@@ -59,7 +59,7 @@ fun DiagnosticsScreen(
     ) {
         item { LatencyCard(latency) }
         item { ActionCard(actionCounts) }
-        item { PrivacyCard(uploaded = uploaded, total = total) }
+        item { PrivacyCard(attempted = attempted, total = total) }
         item { LogEntryCard(onClick = { navigator.push(Route.Logs) }) }
         item { DeveloperModeCard(checked = devMode, onCheckedChange = settings::setDeveloperMode) }
         // 自测工具只在开发者模式下出现 —— 它会往统计里写入自产数据，
@@ -291,24 +291,24 @@ private fun SelfTestCard() {
 }
 
 @Composable
-private fun PrivacyCard(uploaded: Int, total: Int) {    Card(modifier = Modifier.fillMaxWidth()) {
+private fun PrivacyCard(attempted: Int, total: Int) {    Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("隐私核验", style = MaterialTheme.typography.titleMedium)
+            Text("判断路径", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "验证码类消息会被本地闸门拦下，永不上送 —— 它的 uploaded 始终为 0。" +
-                    "这个数字让隐私承诺可被核验，而不是只写在文档里。",
+                "本地识别出的验证码直接放行，不调用后端。" +
+                    "以下统计后端判断尝试，不代表实际网络上传量，也不计每次重试。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
-                Text("已上送 API", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("$uploaded 条", style = MaterialTheme.typography.bodyMedium)
+                Text("调用后端判断", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text("$attempted 条", style = MaterialTheme.typography.bodyMedium)
             }
             Row(modifier = Modifier.fillMaxWidth()) {
-                Text("本地拦截未上送", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("${(total - uploaded).coerceAtLeast(0)} 条", style = MaterialTheme.typography.bodyMedium)
+                Text("未调用后端（含待处理）", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text("${(total - attempted).coerceAtLeast(0)} 条", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

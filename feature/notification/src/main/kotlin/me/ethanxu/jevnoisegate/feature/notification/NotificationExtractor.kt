@@ -1,6 +1,7 @@
 package me.ethanxu.jevnoisegate.feature.notification
 
 import android.app.Notification
+import androidx.core.app.NotificationCompat
 import android.os.Build
 import android.service.notification.StatusBarNotification
 import me.ethanxu.jevnoisegate.core.fingerprint.Fingerprint
@@ -44,6 +45,8 @@ object NotificationExtractor {
             if (text.isNotEmpty() && text !in parts) parts += text
         }
 
+        NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
+            ?.messages?.forEach { add(it.text) }
         add(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
         add(extras.getCharSequence(Notification.EXTRA_TEXT))
 

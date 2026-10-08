@@ -9,6 +9,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.RoomDatabase
 import kotlinx.coroutines.flow.Flow
 
@@ -66,13 +67,16 @@ data class MessageEventEntity(
     /** 模型往返耗时（毫秒）。这是"能否跑赢通知震动"的直接证据。 */
     val latencyMs: Long? = null,
     /**
-     * 是否真的把内容发送到了外部 API。
-     *
-     * 独立成列是为了让"验证码永不上送"这个隐私承诺**可被统计验证**，
-     * 而不是只写在注释里。
+     * 是否调用过后端。保留旧 uploaded 列名以兼容已有数据库。
+     * 这不能证明请求已发送或服务端已接收。
      */
-    val uploaded: Boolean? = null,
+    @ColumnInfo(name = "uploaded") val backendAttempted: Boolean? = null,
+    @ColumnInfo(defaultValue = "0") val decidedAtMs: Long = 0L,
 )
+
+/** User corrections survive event cleanup and never send the message to a model. */
+@Entity(tableName = "user_allow")
+data class UserAllowEntity(@PrimaryKey val fingerprint: String, val createdAtMs: Long)
 
 /** 按渠道聚合的计数投影，用于回答"到底哪些 App 的哪些渠道在发广告"。 */
 data class ChannelCount(
@@ -95,6 +99,36 @@ data class ActionCount(
 
 @Dao
 interface ObservedEventDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM user_allow WHERE fingerprint = :fingerprint)")
+    suspend fun isUserAllowed(fingerprint: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putUserAllow(value: UserAllowEntity)
+
+    @Query("SELECT * FROM observed_event WHERE id = :id")
+    suspend fun find(id: String): MessageEventEntity?
+
+    @Query("UPDATE observed_event SET action = 'ALLOW', decidedBy = 'USER', failureReason = NULL WHERE id = :id AND action = 'QUARANTINE'")
+    suspend fun markRestored(id: String): Int
+
+    @Transaction
+    suspend fun restore(id: String, nowMs: Long): MessageEventEntity? {
+        val event = find(id)?.takeIf { it.action == "QUARANTINE" } ?: return null
+        putUserAllow(UserAllowEntity(correctionKey(event.bucketKey, event.title, event.body), nowMs))
+        markRestored(id)
+        return event
+    }
+
+    @Query("SELECT * FROM observed_event WHERE action = 'QUARANTINE' ORDER BY timestampMs DESC LIMIT :limit")
+    fun observeQuarantined(limit: Int): Flow<List<MessageEventEntity>>
+    @Query("SELECT COUNT(*) FROM observed_event WHERE action = 'QUARANTINE'")
+    fun observeQuarantineCount(): Flow<Int>
+
+    @Query("SELECT * FROM observed_event WHERE source = 'SMS' AND action IN ('SILENT_SUPPRESS', 'QUARANTINE') AND decidedAtMs >= :sinceMs ORDER BY decidedAtMs DESC LIMIT 128")
+    suspend fun recentSuppressedSms(sinceMs: Long): List<MessageEventEntity>
+
+    @Query("DELETE FROM observed_event WHERE timestampMs < :cutoffMs OR id NOT IN (SELECT id FROM observed_event ORDER BY timestampMs DESC LIMIT 10000)")
+    suspend fun prune(cutoffMs: Long)
 
     /** 冲突时忽略：同一 id 重复上报（通知更新、广播重放）不应产生重复行。 */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -131,8 +165,9 @@ interface ObservedEventDao {
             confidence = :confidence,
             failureReason = :failureReason,
             latencyMs = :latencyMs,
-            uploaded = :uploaded
-        WHERE id = :id
+            uploaded = :backendAttempted,
+            decidedAtMs = :decidedAtMs
+        WHERE id = :id AND (decidedBy IS NULL OR decidedBy != 'USER')
         """,
     )
     suspend fun recordDecision(
@@ -143,7 +178,8 @@ interface ObservedEventDao {
         confidence: Float?,
         failureReason: String?,
         latencyMs: Long,
-        uploaded: Boolean,
+        backendAttempted: Boolean,
+        decidedAtMs: Long = System.currentTimeMillis(),
     ): Int
 
     /**
@@ -176,9 +212,11 @@ interface ObservedEventDao {
      */
     @Query(
         """
-        SELECT latencyMs FROM observed_event
-        WHERE latencyMs IS NOT NULL AND decidedBy IN ('MODEL', 'FALLBACK')
-        ORDER BY latencyMs
+        SELECT latencyMs FROM (
+            SELECT latencyMs FROM observed_event
+            WHERE latencyMs IS NOT NULL AND decidedBy IN ('MODEL', 'FALLBACK')
+            ORDER BY timestampMs DESC LIMIT 1000
+        ) ORDER BY latencyMs
         """,
     )
     fun observeLatencies(): Flow<List<Long>>
@@ -193,9 +231,9 @@ interface ObservedEventDao {
     )
     fun observeActionCounts(): Flow<List<ActionCount>>
 
-    /** 实际外发到 API 的事件数。用于核验隐私承诺是否兑现。 */
+    /** 调用过后端的事件数；不是网络外发或服务端接收计数。 */
     @Query("SELECT COUNT(*) FROM observed_event WHERE uploaded = 1")
-    fun observeUploadedCount(): Flow<Int>
+    fun observeBackendAttemptCount(): Flow<Int>
 
     @Query("DELETE FROM observed_event")
     suspend fun clear()
@@ -206,9 +244,9 @@ interface ObservedEventDao {
 }
 
 @Database(
-    entities = [MessageEventEntity::class],
-    version = 2,
-    exportSchema = false,
+    entities = [MessageEventEntity::class, UserAllowEntity::class],
+    version = 3,
+    exportSchema = true,
 )
 abstract class JevNoiseGateDatabase : RoomDatabase() {
     abstract fun observedEventDao(): ObservedEventDao

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +58,8 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val preferences: StateFlow<AppPreferences> = repository.preferences
+    val persistenceError: StateFlow<String?> = repository.persistenceError
+    suspend fun awaitReady() = repository.awaitReady()
 
     private val _connectionTest = MutableStateFlow(ConnectionTestState())
     val connectionTest: StateFlow<ConnectionTestState> = _connectionTest.asStateFlow()
@@ -113,7 +116,7 @@ class SettingsViewModel @Inject constructor(
      *
      * 代理则**取生效中的那一份**（[verifiedProxySpecOrNull]），不取表单值：
      * 本页要回答的是"应用现在到底能不能用"，所以必须和真实请求走同一条路。
-     * 表单里的代理改动要先去「网络代理」页验证并重启才会生效。
+     * 表单里的代理改动要先去「网络代理」页验证并保存，随后新请求使用新配置。
      */
     fun testApiConnection(apiKey: String, baseUrl: String) {
         if (apiKey.isBlank()) {
@@ -128,6 +131,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    repository.awaitReady()
                     val prefs = repository.preferences.value
                     val client = TypeSafeClient(
                         TypeSafeConfig(
@@ -143,7 +147,7 @@ class SettingsViewModel @Inject constructor(
                         // 临时客户端必须关掉，否则每次测试都泄漏一个连接池。
                         client.close()
                     }
-                }
+                }.onFailure { if (it is CancellationException) throw it }
             }
             _connectionTest.value = result.fold(
                 onSuccess = { models ->
@@ -191,7 +195,7 @@ class SettingsViewModel @Inject constructor(
 
         if (proxyType == AppPreferences.PROXY_NONE) {
             _proxySave.value = ProxySaveState(running = true)
-            viewModelScope.launch {
+            launchProxySave {
                 repository.saveProxyConfig(proxyType, host, proxyPort, username, proxyPassword)
                 _proxySave.value = ProxySaveState(
                     running = false,
@@ -215,7 +219,7 @@ class SettingsViewModel @Inject constructor(
         }
 
         _proxySave.value = ProxySaveState(running = true)
-        viewModelScope.launch {
+        launchProxySave {
             val timeoutMs = repository.preferences.value.timeoutMs
             // 只记端点，**不记 ProxySpec 对象**。它是 data class，toString() 里带着明文密码，
             // 而这个日志会落到 runtime.log 并显示在运行日志页 —— 我第一版就是这么写的，
@@ -270,7 +274,29 @@ class SettingsViewModel @Inject constructor(
     }
 
     private inline fun launchSetting(crossinline block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLog.w(LogCategory.SYSTEM, "Settings", error) { "设置未保存" }
+            }
+        }
+    }
+
+    private fun launchProxySave(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                repository.awaitReady()
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                _proxySave.value = ProxySaveState(saved = false,
+                    message = "保存失败：${failure.message ?: "请稍后重试"}")
+            }
+        }
     }
 
     private companion object {

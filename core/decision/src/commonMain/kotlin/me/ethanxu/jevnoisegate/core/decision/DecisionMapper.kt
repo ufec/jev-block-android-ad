@@ -43,7 +43,9 @@ object DecisionMapper {
                 // NaN 必须显式拦下：NaN 参与的任何比较都是 false，若只写
                 // `confidence < threshold` 就会让 NaN 掉进"执行动作"分支，
                 // 用垃圾数据去拦截用户的消息 —— 这是 fail-open 的反面。
-                !outcome.confidence.isFinite() || outcome.confidence < config.minConfidence ->
+                !outcome.confidence.isFinite() || outcome.confidence !in 0f..1f ||
+                    !config.minConfidence.isFinite() || config.minConfidence !in 0f..1f ||
+                    outcome.confidence < config.minConfidence ->
                     allow(
                         input = input,
                         decidedBy = DecidedBy.MODEL,

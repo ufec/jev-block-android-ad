@@ -33,7 +33,7 @@ internal fun proxySpecOrNull(prefs: AppPreferences): ProxySpec? =
 /**
  * 同上，但接收拆开的各项。
  *
- * 保留这个重载是给「用表单当前值临时构造」的场景用的：用户改完还没重启，
+ * 保留这个重载是给「用表单当前值临时构造」的场景用的：用户改完还没保存，
  * 用已保存的值去测等于在测旧配置。
  */
 internal fun proxySpecOrNull(

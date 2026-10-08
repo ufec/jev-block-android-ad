@@ -2,6 +2,8 @@
 
 An Android noise gate for notifications and SMS.
 
+Project review and fixes: [review](docs/PROJECT_REVIEW.md), [fixes and validation](docs/FIXES.md).
+
 Rule-based blockers are brittle in both directions: a keyword list that
 catches ads will eventually swallow a verification code, and it will never
 catch an ad phrased in a way nobody anticipated. JevNoiseGate asks a model
@@ -23,13 +25,14 @@ The reasoning: leaking one ad costs a moment of annoyance. Swallowing one
 verification code can cost someone an account. The asymmetry is large enough
 that the default has to favour letting things through.
 
-### OTP never leaves the device
+### Locally recognized OTP messages stay out of model requests
 
-A local gate matches verification-code shapes before anything else runs
-(`OtpGate`). On a match the message is allowed and **no request is made at
-all** — not "the request is made but the field is stripped". The diagnostics
-screen reports an upload count so this claim is observable rather than just
-asserted.
+A local gate checks both title and body before blacklist or model decisions
+(`OtpGate`). On a match the message is allowed and **no backend call is made**.
+It recognizes common numeric and alphanumeric code formats, including split
+title/body messages. Recognition is heuristic: unfamiliar wording can miss
+the gate. The diagnostics screen reports backend attempts, not transport-level
+upload counts; the no-call invariant is covered by pipeline tests.
 
 ### Hard rules stay local
 
@@ -37,7 +40,7 @@ Two mechanisms deliberately do **not** go through the model:
 
 | Mechanism | Behaviour |
 |---|---|
-| SMS sender blacklist | Exact identifier match. Blocks without a network call, so it cannot be defeated by a timeout or an API outage. |
+| SMS sender blacklist | Normalized number, prefix or suffix match. Blocks locally after the OTP gate. |
 | OTP gate | Allows without a network call. |
 
 A model is the right tool for "is this an ad". It is the wrong tool for
@@ -59,8 +62,9 @@ and SMS to drift apart in behaviour.
 The pipeline runs in a fixed order:
 
 1. **OTP gate** — local, resolves without network
-2. **SMS blacklist** — local, resolves without network
-3. **Model** — everything else, with channel history and user rules attached
+2. **User corrections** — restored identical content is allowed locally
+3. **SMS blacklist** — local, resolves without network
+4. **Model** — everything else, with channel history and user rules attached
    as structured `state`
 
 The model receives a structured state rather than a bare string:
@@ -101,6 +105,11 @@ This is not a bug, but it is not what "block" usually implies either. There is
 no way to decide before the notification appears without blocking the system
 callback.
 
+Each notification key has a generation. A result for an older message cannot
+cancel an updated or reposted message. Model work is limited to four concurrent
+requests and a 15-second total deadline, including queueing and retries. At
+most 64 notification decisions remain in flight; overload passes through.
+
 ### Blocking an SMS only removes its notification
 
 Only the default SMS app may delete SMS. JevNoiseGate is not the default SMS
@@ -112,12 +121,30 @@ So blocking an SMS means revoking the notification its app posted. The message
 you glance at and ignore without opening the messaging app — this removes
 essentially all of the interruption, but it is a real limitation.
 
+SMS broadcasts perform only capture and local decisions, with an eight-second
+budget. Model decisions run as unique persistent WorkManager jobs. Suppression
+requests wait up to 60 seconds for a matching notification. Ambiguous matches
+and grouped notifications stay visible to protect unrelated messages.
+
+### Quarantine and recovery
+
+The event screen has a paginated quarantine view. Recovery posts a new
+JevNoiseGate notification containing the saved title/body and stores a local
+allow correction for the complete identical content and source bucket. It
+does not recreate the original app's notification buttons or pending intents.
+Notification permission is required to post the recovery notification.
+Silent suppression retains an audit event but offers no recovery action.
+
+Events are retained for 30 days, with a maximum of 10,000 rows. User corrections
+survive event cleanup. Latency statistics use the most recent 1,000 decisions.
+Database upgrades from version 2 preserve existing history.
+
 ---
 
 ## Features
 
 - **Two ingestion paths** — notifications and SMS, one shared pipeline
-- **Local OTP gate** — verification codes are allowed and never uploaded
+- **Local OTP gate** — recognized code messages are allowed without backend calls
 - **SMS sender blacklist** — hard rule, evaluated before the model
 - **User rules** — free-text preferences injected into the model state as soft
   constraints
@@ -173,6 +200,15 @@ rather than here.
 ./gradlew assembleDebug
 ```
 
+Run the same validation used by pull requests and releases:
+
+```bash
+./gradlew verify
+```
+
+This runs all modules' host/unit tests and Android Lint, including pipeline,
+settings persistence, notification extraction and database migration tests.
+
 ### First run
 
 1. Grant notification access (Settings → Notifications → Notification access).
@@ -193,7 +229,7 @@ rather than here.
 | Setting | Notes |
 |---|---|
 | API key, base URL, model, timeout | Required for real decisions. The model list can be fetched from the backend. |
-| Network proxy | HTTP / HTTPS / SOCKS5. HTTP and HTTPS map to the same implementation — HTTPS targets tunnel through CONNECT. Changes take effect on next launch. |
+| Network proxy | HTTP / HTTPS / SOCKS5. HTTP and HTTPS map to the same implementation — HTTPS targets tunnel through CONNECT. Saved changes take effect on the next decision. |
 | User rules | Plain-language preferences, injected into the model state. Soft constraints. |
 | SMS blacklist | Numbers, prefix or suffix matched, evaluated before the model. Hard rule. |
 | Per-app filter | Opt an app out of ingestion entirely. |
@@ -203,19 +239,20 @@ rather than here.
 
 ## Security notes
 
-**The API key and proxy credentials are stored in plaintext**, in the app's
-private Preferences DataStore. There is no Keystore-backed encryption.
+API keys and proxy credentials are encrypted in Preferences DataStore using
+AES-GCM and a device-bound Android Keystore key. Legacy plaintext credentials
+are migrated on first load. Missing or unreadable settings fail open and are
+reported in the settings screen. Writes are persisted in the same order as
+in-memory changes; accepted writes survive cancellation of their UI caller.
 
-This is a deliberate trade-off — the complexity of Keystore-based
-encryption was judged not worth it for this app — but it has consequences you
-should be aware of:
+Application data is excluded from cloud backup and device transfer. Full
+message text remains in the private event database for the retention period;
+users can clear it from the event screen. Credentials exist in memory while
+used, so Keystore storage does not protect a compromised running process.
 
-- On a rooted device, any process with root can read them.
-- They may be included in device backups or extractions.
-- **Do not supply a key you cannot rotate.**
-
-The app's private storage is not readable by other apps on a non-rooted
-device.
+`local.properties` API keys can be bundled into debug builds for development;
+release builds always contain an empty bundled key. Release users enter their
+own key. Saved API settings are validated and applied to the next decision.
 
 ---
 

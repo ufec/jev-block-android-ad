@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.ethanxu.jevnoisegate.core.data.ActionCount
 import me.ethanxu.jevnoisegate.core.data.ChannelCount
 import me.ethanxu.jevnoisegate.core.data.MessageEventEntity
@@ -60,6 +67,7 @@ data class AppEventGroup(
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val dao: ObservedEventDao,
+    private val recoveryNotifier: RecoveryNotifier,
 ) : ViewModel() {
 
     val events: StateFlow<List<MessageEventEntity>> =
@@ -98,8 +106,33 @@ class MainViewModel @Inject constructor(
 
     val actionCounts: StateFlow<List<ActionCount>> = dao.observeActionCounts().asState(emptyList())
 
-    /** 实际上送 API 的事件数 —— 隐私承诺的可核验指标。 */
-    val uploadedCount: StateFlow<Int> = dao.observeUploadedCount().asState(0)
+    /** 后端调用尝试数，包括配置缺失等未发送请求的失败。 */
+    val backendAttemptCount: StateFlow<Int> = dao.observeBackendAttemptCount().asState(0)
+    private val quarantineLimit = MutableStateFlow(100)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val quarantinedEvents = quarantineLimit.flatMapLatest { dao.observeQuarantined(it) }.asState(emptyList())
+    val quarantineCount = dao.observeQuarantineCount().asState(0)
+    fun loadMoreQuarantined() { quarantineLimit.value = (quarantineLimit.value + 100).coerceAtMost(10_000) }
+    private val _restoreMessage = MutableStateFlow<String?>(null)
+    val restoreMessage = _restoreMessage.asStateFlow()
+    private val restoreLock = Mutex()
+
+    fun restore(id: String) {
+        viewModelScope.launch {
+            restoreLock.withLock {
+                try {
+                    val event = dao.find(id)?.takeIf { it.action == "QUARANTINE" } ?: return@withLock
+                    recoveryNotifier.post(event)
+                    dao.restore(id, System.currentTimeMillis())
+                    _restoreMessage.value = "已重新发送通知，相同完整内容今后优先放行"
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    _restoreMessage.value = "恢复失败：${failure.message ?: "请稍后重试"}"
+                }
+            }
+        }
+    }
 
     fun clearAll() {
         viewModelScope.launch { dao.clear() }

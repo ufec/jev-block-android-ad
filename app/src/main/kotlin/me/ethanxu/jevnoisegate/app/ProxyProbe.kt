@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.ethanxu.typesafe.sdk.ProxyKind
 import me.ethanxu.typesafe.sdk.ProxySpec
+import me.ethanxu.jevnoisegate.core.data.settings.isValidBaseUrl
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -76,12 +77,19 @@ internal suspend fun probeProxy(
     spec: ProxySpec?,
     timeoutMs: Long,
 ): ProxyProbeResult = withContext(Dispatchers.IO) {
+    if (!isValidBaseUrl(baseUrl)) {
+        return@withContext ProxyProbeResult.Failed("Base URL 必须是有效的 HTTP(S) 地址")
+    }
     // 代理回 407 时 OkHttp 不会把响应交给我们 —— 它在 CONNECT 阶段就调用
     // proxyAuthenticator，认证器返回 null 便直接抛 IOException("Failed to authenticate
     // with proxy")。判定"代理是否真的要求认证"因此只能靠认证器，而不是看响应码；
     // 而且认证器**每次都会被抢先调用一次**，所以还得把那次区分出去。
     val challenged = AtomicBoolean(false)
-    val client = buildProbeClient(spec, timeoutMs, challenged)
+    val client = try {
+        buildProbeClient(spec, timeoutMs.coerceIn(1_000L, 60_000L), challenged)
+    } catch (invalid: IllegalArgumentException) {
+        return@withContext ProxyProbeResult.Failed(invalid.message ?: "代理配置无效")
+    }
     val request = Request.Builder()
         .url(baseUrl.trimEnd('/') + MODELS_PATH)
         .header("User-Agent", "JevNoiseGate/${BuildConfig.VERSION_NAME} (proxy probe)")
@@ -106,6 +114,8 @@ internal suspend fun probeProxy(
         } else {
             ProxyProbeResult.Failed(describe(e, timeoutMs))
         }
+    } catch (e: IllegalArgumentException) {
+        ProxyProbeResult.Failed(e.message ?: "请求配置无效")
     } finally {
         // 每次探测单独建客户端，用完把连接池清掉。调度器的空闲线程会自行回收，
         // 不额外 shutdown：那需要碰 Dispatcher 的实现细节，收益不值这个耦合。

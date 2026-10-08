@@ -9,27 +9,33 @@ package me.ethanxu.jevnoisegate.core.pipeline
  * 2. **安全**：验证码是被误拦时代价最高的消息类型 —— 漏放一条广告无感，
  *    错拦一条验证码会让用户被锁在银行外面。
  *
- * 判定规则是"命中关键词 **且** 含数字"。只匹配关键词会误伤（"下载 App 获取验证码"这类营销文案
- * 也含"验证码"），而真实验证码短信**必然同时含关键词和验证码数字**，两者取交集既精确又够宽。
+ * 合并标题与正文匹配验证码关键词及 4–8 位数字/字母代码，也保护纯数字代码。
+ * 这是启发式规则，无法保证识别所有验证码格式；命中的内容不会调用后端。
  *
  * 刻意保持"宁可多放行不可少放行"的偏向：这是保险丝，不是分类器。
  */
 object OtpGate {
 
     private val KEYWORD_PATTERN = Regex(
-        pattern = """验证码|校验码|动态码|动态口令|短信密码|一次性密码|安全码|""" +
-            """verification\s+code|security\s+code|one[\s-]?time\s+(code|password)|OTP""",
+        pattern = """验证码|校验码|动态码|动态口令|短信密码|一次性密码|安全码|登录码|认证码|确认码|授权码|""" +
+            """verification\s+code|security\s+code|one[\s-]?time\s+(code|password)|""" +
+            """\bOTP\b|\b(?:login|sign[\s-]?in|authentication|confirmation)\s+code\b|\byour\s+code\b|\bpasscode\b|\b2FA\b""",
         option = RegexOption.IGNORE_CASE,
     )
 
-    /** 4–8 位连续数字，覆盖主流验证码长度。 */
-    private val CODE_PATTERN = Regex("""\d{4,8}""")
+    /** 4–8 位数字或字母代码，以及分隔的数字代码。 */
+    private val CODE_PATTERN = Regex("""(?<![A-Za-z0-9])[A-Za-z0-9]{4,8}(?![A-Za-z0-9])""")
+    private val SPACED_CODE_PATTERN = Regex("""(?<!\d)\d(?:[ -]?\d){3,7}(?!\d)""")
+    private val NUMERIC_ONLY_PATTERN = Regex("""\d{4,8}""")
 
     /**
      * @return true 表示这是一条疑似验证码消息，应当放行且不上送。
      */
-    fun isOtpLike(body: String): Boolean {
-        if (body.isBlank()) return false
-        return KEYWORD_PATTERN.containsMatchIn(body) && CODE_PATTERN.containsMatchIn(body)
+    fun isOtpLike(body: String, title: String? = null): Boolean {
+        val text = listOfNotNull(title, body).joinToString("\n")
+        if (text.isBlank()) return false
+        return (KEYWORD_PATTERN.containsMatchIn(text) &&
+            (CODE_PATTERN.containsMatchIn(text) || SPACED_CODE_PATTERN.containsMatchIn(text))) ||
+            NUMERIC_ONLY_PATTERN.matches(body.trim())
     }
 }
