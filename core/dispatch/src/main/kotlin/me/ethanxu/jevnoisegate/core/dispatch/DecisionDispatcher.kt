@@ -15,6 +15,7 @@ import me.ethanxu.jevnoisegate.core.model.FinalDecision
 import me.ethanxu.jevnoisegate.core.model.bucketKey
 import me.ethanxu.jevnoisegate.core.pipeline.MessagePipeline
 import me.ethanxu.jevnoisegate.core.pipeline.PipelineResult
+import me.ethanxu.jevnoisegate.core.common.DecisionTrace
 
 @Singleton
 class DecisionDispatcher @Inject constructor(
@@ -23,7 +24,7 @@ class DecisionDispatcher @Inject constructor(
     private val categoriesProvider: CategoriesProvider,
     private val settings: SettingsRepository,
 ) {
-    private suspend fun input(event: MessageEvent, labels: EventLabels): DecisionInput {
+    private suspend fun input(event: MessageEvent, labels: EventLabels, trace: DecisionTrace): DecisionInput {
         settings.awaitReady()
         val prefs = settings.preferences.value
         return DecisionInput(
@@ -33,40 +34,44 @@ class DecisionDispatcher @Inject constructor(
             labels = labels,
             userRules = UserRules(prefs.preferAllowRules, prefs.preferBlockRules),
             smsSenderBlacklist = prefs.smsSenderBlacklist,
-            userAllowed = dao.isUserAllowed(correctionKey(event.bucketKey, event.title, event.body)),
+            userAllowed = trace.database { dao.isUserAllowed(correctionKey(event.bucketKey, event.title, event.body)) },
         )
     }
 
     /** Safe inside a broadcast: only local rules and database operations. */
-    suspend fun dispatchLocal(event: MessageEvent, labels: EventLabels = EventLabels()): FinalDecision? {
-        val result = pipeline.localDecision(input(event, labels)) ?: return null
-        record(result)
+    suspend fun dispatchLocal(event: MessageEvent, labels: EventLabels = EventLabels(), trace: DecisionTrace = DecisionTrace()): FinalDecision? {
+        val result = pipeline.localDecision(input(event, labels, trace)) ?: return null
+        trace.prepared()
+        record(result, trace)
         return result.decision
     }
 
-    suspend fun dispatch(event: MessageEvent, labels: EventLabels = EventLabels()): FinalDecision {
-        val base = input(event, labels)
-        pipeline.localDecision(base)?.let { record(it); return it.decision }
-        val stats = dao.channelStats(event.bucketKey, excludeId = event.id)
+    suspend fun dispatch(event: MessageEvent, labels: EventLabels = EventLabels(), trace: DecisionTrace = DecisionTrace()): FinalDecision {
+        val base = input(event, labels, trace)
+        pipeline.localDecision(base)?.let { trace.prepared(); record(it, trace); return it.decision }
+        val stats = trace.database { dao.channelStats(event.bucketKey, excludeId = event.id) }
+        trace.prepared()
         val result = pipeline.process(base.copy(context = base.context.copy(
             totalSeen = stats.totalSeen, suppressedCount = stats.suppressedCount,
         )))
         // A user may restore the message while a model request is in flight.
-        val corrected = if (dao.isUserAllowed(correctionKey(event.bucketKey, event.title, event.body))) {
+        trace.queueMs = result.queueMs
+        trace.backendMs = result.backendMs
+        val corrected = if (trace.database { dao.isUserAllowed(correctionKey(event.bucketKey, event.title, event.body)) }) {
             pipeline.localDecision(base.copy(userAllowed = true))!!
                 .copy(backendAttempted = result.backendAttempted)
         } else result
-        record(corrected)
+        record(corrected, trace)
         return corrected.decision
     }
 
-    private suspend fun record(result: PipelineResult) {
+    private suspend fun record(result: PipelineResult, trace: DecisionTrace) {
         val decision = result.decision
-        dao.recordDecision(
+        trace.database { dao.recordDecision(
             id = decision.event.id, action = decision.action.name, decidedBy = decision.decidedBy.name,
             category = decision.category, confidence = decision.confidence,
             failureReason = decision.failureReason?.name, latencyMs = decision.latencyMillis,
             backendAttempted = result.backendAttempted,
-        )
+        ) }
     }
 }

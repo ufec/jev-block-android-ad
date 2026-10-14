@@ -1,0 +1,75 @@
+{
+  "scope": "Actual Kotlin methods on desktop JVM; excludes Binder, Android scheduling and disk",
+  "java": "17.0.20.1",
+  "normalizer": [
+    {
+      "chars": 1024,
+      "median_ms": 8.4653,
+      "url_stage_median_ms": 6.6935,
+      "result_chars": 40
+    },
+    {
+      "chars": 4096,
+      "median_ms": 94.1321,
+      "url_stage_median_ms": 82.1315,
+      "result_chars": 40
+    },
+    {
+      "chars": 8192,
+      "median_ms": 390.0969,
+      "url_stage_median_ms": 393.998,
+      "result_chars": 40
+    },
+    {
+      "chars": 16384,
+      "median_ms": 1592.1909,
+      "url_stage_median_ms": 1319.1786,
+      "result_chars": 40
+    }
+  ],
+  "controls": {
+    "cjk_16384_median_ms": 7.3191,
+    "short_ascii_tokens_16384_median_ms": 8.1256,
+    "nullable_cache_getOrPut_calls": 10,
+    "nullable_cache_loader_calls": 10
+  },
+  "sms_batch": [
+    {
+      "pending": 1,
+      "active": 1,
+      "shared_prefix_chars": 1024,
+      "pairs_per_round": 1,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 0.0111
+    },
+    {
+      "pending": 128,
+      "active": 32,
+      "shared_prefix_chars": 1024,
+      "pairs_per_round": 4096,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 1.8674
+    },
+    {
+      "pending": 128,
+      "active": 128,
+      "shared_prefix_chars": 1024,
+      "pairs_per_round": 16384,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 2.0831
+    },
+    {
+      "pending": 128,
+      "active": 128,
+      "shared_prefix_chars": 16384,
+      "pairs_per_round": 16384,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 3.0263
+    }
+  ],
+  "source_sha256": {
+    "feature/notification/src/main/kotlin/me/ethanxu/jevnoisegate/feature/notification/SmsNotificationMatcher.kt": "5A37D576D4D5ABF3EE06B35913C96BF70BF8B86836BEB45B54A7B13C5085891E",
+    "core/fingerprint/src/commonMain/kotlin/me/ethanxu/jevnoisegate/core/fingerprint/TextNormalizer.kt": "C17F18F3B5BD2587588F9B7C8525DC7192D495A86B13FFF41632138E13853753",
+    "feature/notification/src/main/kotlin/me/ethanxu/jevnoisegate/feature/notification/SmsBatchMatcher.kt": "63EF70248D241CA93A2DA688B8525177F6971D47E76DB7C58EE0CE0881E75C73"
+  }
+}

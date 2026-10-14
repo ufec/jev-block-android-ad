@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
@@ -23,7 +22,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
 import me.ethanxu.jevnoisegate.core.common.log.AppLog
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 
 /**
  * 设置读写。
@@ -44,6 +46,8 @@ import me.ethanxu.jevnoisegate.core.common.log.AppLog
  * 都会立刻看到 —— 这正是逐页各持一份 ViewModel 时最容易出错的地方。
  */
 interface SettingsRepository {
+    /** Defaults are provisional until the first load attempt finishes. */
+    val isReady: Boolean get() = true
     val preferences: StateFlow<AppPreferences>
 
     /**
@@ -65,6 +69,9 @@ interface SettingsRepository {
     suspend fun setBaseUrl(value: String)
     suspend fun setModel(value: String)
     suspend fun setTimeoutMs(value: Long)
+    suspend fun saveApiSettings(apiKey: String, baseUrl: String, model: String, timeoutMs: Long) {
+        setApiKey(apiKey); setBaseUrl(baseUrl); setModel(model); setTimeoutMs(timeoutMs)
+    }
 
     /** 关闭/开启对某个 App 的通知监听。 */
     suspend fun setAppMuted(packageName: String, muted: Boolean)
@@ -131,6 +138,7 @@ internal class DataStoreSettingsRepository(
     private val secrets: SecretCodec,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SettingsRepository {
+    override val isReady: Boolean get() = ready.isCompleted
 
     /** 界面看到的唯一真相源。进程内单例，因此全局一致。 */
     private val inMemory = MutableStateFlow(AppPreferences())
@@ -144,8 +152,13 @@ internal class DataStoreSettingsRepository(
     @Volatile private var loaded = false
     private val error = MutableStateFlow<String?>(null)
     override val persistenceError: StateFlow<String?> = error.asStateFlow()
-    private data class Write(val snapshot: AppPreferences, val done: CompletableDeferred<Unit>)
-    private val writes = Channel<Write>(Channel.UNLIMITED)
+    private data class Write(val snapshot: AppPreferences, val completions: List<CompletableDeferred<Unit>>)
+    private var pendingSnapshot: AppPreferences? = null
+    private val pendingCompletions = mutableListOf<CompletableDeferred<Unit>>()
+    private var lastPersisted: AppPreferences? = null
+    private var writing = false
+    private val slots = Semaphore(64)
+    private val writes = Channel<Unit>(Channel.CONFLATED)
 
     init {
         // 启动时从磁盘载入一次。之后内存是权威，磁盘只是持久化副本。
@@ -154,6 +167,7 @@ internal class DataStoreSettingsRepository(
                 withTimeoutOrNull(5_000L) {
                     val stored = dataStore.data.first()
                     inMemory.value = stored.toAppPreferences(secrets)
+                    lastPersisted = inMemory.value
                     loaded = true
                     // The deadline includes migration so a stalled write cannot delay readiness.
                     val secretKeys = listOf(Keys.API_KEY, Keys.PROXY_USERNAME, Keys.PROXY_PASSWORD)
@@ -162,7 +176,10 @@ internal class DataStoreSettingsRepository(
                         dataStore.edit { values ->
                             secretKeys.forEach { key ->
                                 val value = values[key].orEmpty()
-                                if (value.isNotEmpty() && !value.startsWith(AndroidSecretCodec.PREFIX)) values[key] = secrets.encrypt(value)
+                                if (value.isNotEmpty() && !value.startsWith(AndroidSecretCodec.PREFIX)) {
+                                    values[key] = secrets.encrypt(value)
+                                    PerformanceMetrics.increment(PerformanceCounter.SETTINGS_ENCRYPT)
+                                }
                             }
                         }
                     }
@@ -175,17 +192,32 @@ internal class DataStoreSettingsRepository(
                 AppLog.configure(inMemory.value.logLevel)
                 ready.complete(Unit)
             }
-            for (write in writes) {
+            for (ignored in writes) {
+                val write = synchronized(memoryLock) {
+                    pendingSnapshot?.let { snapshot ->
+                        Write(snapshot, pendingCompletions.toList()).also {
+                            writing = true
+                            pendingSnapshot = null
+                            pendingCompletions.clear()
+                        }
+                    }
+                } ?: continue
                 try {
-                    dataStore.edit { persistSnapshot(it, write.snapshot) }
+                    val previous = synchronized(memoryLock) { lastPersisted }
+                    dataStore.edit { persistSnapshot(it, write.snapshot, previous) }
+                    PerformanceMetrics.increment(PerformanceCounter.SETTINGS_WRITE)
+                    synchronized(memoryLock) { lastPersisted = write.snapshot }
                     error.value = null
-                    write.done.complete(Unit)
+                    write.completions.forEach { it.complete(Unit) }
                 } catch (cancelled: CancellationException) {
-                    write.done.cancel(cancelled)
+                    write.completions.forEach { it.cancel(cancelled) }
                     throw cancelled
                 } catch (failure: Exception) {
                     error.value = "设置保存失败，重启后可能丢失改动：${failure::class.java.simpleName}"
-                    write.done.completeExceptionally(failure)
+                    write.completions.forEach { it.completeExceptionally(failure) }
+                } finally {
+                    synchronized(memoryLock) { writing = false }
+                    repeat(write.completions.size) { slots.release() }
                 }
             }
         }
@@ -205,6 +237,10 @@ internal class DataStoreSettingsRepository(
     }
     override suspend fun setModel(value: String) = mutate { it.copy(model = value) }
     override suspend fun setTimeoutMs(value: Long) = mutate { it.copy(timeoutMs = value.coerceIn(1_000L, 60_000L)) }
+    override suspend fun saveApiSettings(apiKey: String, baseUrl: String, model: String, timeoutMs: Long) {
+        require(isValidBaseUrl(baseUrl)) { "Base URL 必须是有效的 HTTP(S) 地址" }
+        mutate { it.copy(apiKey = apiKey, baseUrl = baseUrl, model = model, timeoutMs = timeoutMs.coerceIn(1_000L, 60_000L)) }
+    }
     override suspend fun setAppMuted(packageName: String, muted: Boolean) = mutate {
         it.copy(mutedPackages = if (muted) it.mutedPackages + packageName else it.mutedPackages - packageName)
     }
@@ -229,15 +265,26 @@ internal class DataStoreSettingsRepository(
         it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap())
     }
 
-    /** Memory update and enqueue are atomic; a single process-owned writer persists snapshots. */
+    /** Accepted snapshots coalesce; at most 64 accepted callers await persistence, even on slow storage. */
     private suspend fun mutate(updateMemory: (AppPreferences) -> AppPreferences) {
         ready.await()
         ensureLoaded()
+        slots.acquire()
         val done = CompletableDeferred<Unit>()
-        synchronized(memoryLock) {
-            inMemory.update(updateMemory)
-            AppLog.configure(inMemory.value.logLevel)
-            check(writes.trySend(Write(inMemory.value, done)).isSuccess)
+        var accepted = false
+        try {
+            synchronized(memoryLock) {
+                val next = updateMemory(inMemory.value)
+                if (!writing && pendingSnapshot == null && next == lastPersisted && next == inMemory.value && error.value == null) return
+                inMemory.value = next
+                AppLog.configure(next.logLevel)
+                pendingSnapshot = next
+                pendingCompletions += done
+                accepted = true
+                check(writes.trySend(Unit).isSuccess)
+            }
+        } finally {
+            if (!accepted) slots.release()
         }
         done.await()
     }
@@ -252,6 +299,7 @@ internal class DataStoreSettingsRepository(
                     ?: throw java.io.IOException("Settings reload timed out")
                 synchronized(memoryLock) {
                     inMemory.value = recovered
+                    lastPersisted = recovered
                     AppLog.configure(recovered.logLevel)
                     loaded = true
                 }
@@ -263,11 +311,18 @@ internal class DataStoreSettingsRepository(
             }
         }
     }
-    private fun persistSnapshot(values: androidx.datastore.preferences.core.MutablePreferences, prefs: AppPreferences) {
+    private fun persistSnapshot(values: androidx.datastore.preferences.core.MutablePreferences, prefs: AppPreferences, previous: AppPreferences?) {
+        fun secret(key: Preferences.Key<String>, value: String, old: String?) {
+            if (value.isEmpty()) values[key] = ""
+            else if (value != old || values[key]?.startsWith(AndroidSecretCodec.PREFIX) != true) {
+                values[key] = secrets.encrypt(value)
+                PerformanceMetrics.increment(PerformanceCounter.SETTINGS_ENCRYPT)
+            }
+        }
         values[Keys.UI_MODE] = prefs.uiMode
         values[Keys.COLOR_MODE] = prefs.colorMode
         values[Keys.KEY_COLOR] = prefs.keyColor
-        values[Keys.API_KEY] = secrets.encrypt(prefs.apiKey)
+        secret(Keys.API_KEY, prefs.apiKey, previous?.apiKey)
         values[Keys.BASE_URL] = prefs.baseUrl
         values[Keys.MODEL] = prefs.model
         values[Keys.TIMEOUT_MS] = prefs.timeoutMs
@@ -276,8 +331,8 @@ internal class DataStoreSettingsRepository(
         values[Keys.PROXY_TYPE] = prefs.proxyType
         values[Keys.PROXY_HOST] = prefs.proxyHost
         values[Keys.PROXY_PORT] = prefs.proxyPort
-        values[Keys.PROXY_USERNAME] = secrets.encrypt(prefs.proxyUsername)
-        values[Keys.PROXY_PASSWORD] = secrets.encrypt(prefs.proxyPassword)
+        secret(Keys.PROXY_USERNAME, prefs.proxyUsername, previous?.proxyUsername)
+        secret(Keys.PROXY_PASSWORD, prefs.proxyPassword, previous?.proxyPassword)
         values[Keys.PROXY_VERIFIED_FINGERPRINT] = prefs.proxyVerifiedFingerprint
         values[Keys.PREFER_ALLOW] = prefs.preferAllowRules.joinToString("\n")
         values[Keys.PREFER_BLOCK] = prefs.preferBlockRules.joinToString("\n")

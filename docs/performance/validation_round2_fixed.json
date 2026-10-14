@@ -1,0 +1,251 @@
+{
+  "suite_count": 30,
+  "tests": 182,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "lint_errors": 0,
+  "lint_warnings": 26,
+  "suites": [
+    {
+      "module": "app",
+      "name": "me.ethanxu.jevnoisegate.app.ClientLeasePoolTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "app",
+      "name": "me.ethanxu.jevnoisegate.app.EventSubscriptionsTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "app",
+      "name": "me.ethanxu.jevnoisegate.app.ProxyFingerprintTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "app",
+      "name": "me.ethanxu.jevnoisegate.app.ProxyProbeTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "app",
+      "name": "me.ethanxu.jevnoisegate.app.ProxyValidationTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/common",
+      "name": "me.ethanxu.jevnoisegate.core.common.log.BatchedLogWriterTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/common",
+      "name": "me.ethanxu.jevnoisegate.core.common.PerformanceMetricsTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/common",
+      "name": "me.ethanxu.jevnoisegate.core.common.sms.SmsNotificationSuppressorTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.DatabaseMigrationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.EventStoragePerformanceTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.RetentionSchedulerTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.settings.CategoryOverridesTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.settings.SecretCodecTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "name": "me.ethanxu.jevnoisegate.core.data.settings.SettingsRepositoryTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/decision",
+      "name": "me.ethanxu.jevnoisegate.core.decision.CategoryOverridesTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/decision",
+      "name": "me.ethanxu.jevnoisegate.core.decision.DecisionMapperTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/decision",
+      "name": "me.ethanxu.jevnoisegate.core.decision.QuestionFactoryTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/decision",
+      "name": "me.ethanxu.jevnoisegate.core.decision.SmsBlacklistTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/decision",
+      "name": "me.ethanxu.jevnoisegate.core.decision.StateBuilderTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/fingerprint",
+      "name": "me.ethanxu.jevnoisegate.core.fingerprint.FingerprintTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/fingerprint",
+      "name": "me.ethanxu.jevnoisegate.core.fingerprint.UrlNormalizerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/model",
+      "name": "me.ethanxu.jevnoisegate.core.model.DomainModelTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/pipeline",
+      "name": "me.ethanxu.jevnoisegate.core.pipeline.MessagePipelineTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.AsyncLookupCacheTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.NotificationExtractorTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.NotificationLifecycleTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.NotificationPolicyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.SmsBatchMatcherTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/notification",
+      "name": "me.ethanxu.jevnoisegate.feature.notification.SmsDecisionOwnershipTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "feature/sms",
+      "name": "me.ethanxu.jevnoisegate.feature.sms.SmsIngestionTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ]
+}

@@ -55,7 +55,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.ethanxu.jevnoisegate.app.AppEventGroup
 import me.ethanxu.jevnoisegate.app.MainViewModel
-import me.ethanxu.jevnoisegate.core.data.MessageEventEntity
+import me.ethanxu.jevnoisegate.core.data.EventSummary
+import me.ethanxu.jevnoisegate.core.data.EventContent
+import kotlinx.coroutines.flow.Flow
 import me.ethanxu.jevnoisegate.ui.util.formatTime
 import me.ethanxu.jevnoisegate.ui.util.hasNotificationAccess
 import me.ethanxu.jevnoisegate.ui.util.hasSmsPermission
@@ -66,12 +68,14 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val events by viewModel.events.collectAsStateWithLifecycle()
-    val recentGroups by viewModel.eventGroups.collectAsStateWithLifecycle()
-    val quarantinedEvents by viewModel.quarantinedEvents.collectAsStateWithLifecycle()
     val quarantineCount by viewModel.quarantineCount.collectAsStateWithLifecycle()
     val restoreMessage by viewModel.restoreMessage.collectAsStateWithLifecycle()
     var quarantineOnly by remember { mutableStateOf(false) }
+    val recentGroups = if (!quarantineOnly) viewModel.eventGroups.collectAsStateWithLifecycle().value else emptyList()
+    // Subscribe only to the selected list; both contain metadata projections.
+    val quarantinePage = if (quarantineOnly) viewModel.quarantinePage.collectAsStateWithLifecycle().value else null
+    val quarantinePageNumber by viewModel.quarantinePageNumber.collectAsStateWithLifecycle()
+    val quarantinedEvents = quarantinePage?.entries.orEmpty()
     val groups = recentGroups
     var pendingRestore by remember { mutableStateOf<String?>(null) }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -135,7 +139,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
         item {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (quarantineOnly) "隔离区 · $quarantineCount 条" else "最近事件 · ${groups.size} 个应用 / ${events.size} 条",
+                    text = if (quarantineOnly) "隔离区 · $quarantineCount 条" else "最近事件 · ${groups.size} 个应用 / ${groups.sumOf { it.count }} 条",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -148,12 +152,16 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Text(event.appLabel ?: event.packageName, style = MaterialTheme.typography.titleSmall)
-                        EventDetail(event, restore)
+                        EventDetail(event, restore, viewModel::observeContent)
                     }
                 }
             }
-            if (quarantinedEvents.size < quarantineCount) {
-                item { TextButton(onClick = viewModel::loadMoreQuarantined) { Text("加载更多隔离消息") } }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = viewModel::previousQuarantinePage, enabled = quarantinePageNumber > 1) { Text("上一页") }
+                    Text("第 $quarantinePageNumber 页")
+                    TextButton(onClick = viewModel::nextQuarantinePage, enabled = quarantinePage?.hasNext == true) { Text("下一页") }
+                }
             }
             if (quarantineCount == 0) item { Text("隔离区为空") }
         } else if (groups.isEmpty()) {
@@ -165,6 +173,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
                     group = group,
                     onDelete = { viewModel.deleteApp(group.packageName) },
                     onRestore = restore,
+                    content = viewModel::observeContent,
                 )
             }
         }
@@ -181,7 +190,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit, onRestore: (String) -> Unit) {
+private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit, onRestore: (String) -> Unit, content: (String) -> Flow<EventContent?>) {
     val state = rememberSwipeToDismissBoxState()
 
     // 用 LaunchedEffect 而不是 confirmValueChange 回调里直接删：
@@ -215,7 +224,7 @@ private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit, onRes
             }
         },
     ) {
-        AppGroupCard(group, onRestore)
+        AppGroupCard(group, onRestore, content)
     }
 }
 
@@ -226,7 +235,7 @@ private fun SwipeToDeleteGroup(group: AppEventGroup, onDelete: () -> Unit, onRes
  * 所以默认视图必须足够短；想看全部再手动展开。
  */
 @Composable
-private fun AppGroupCard(group: AppEventGroup, onRestore: (String) -> Unit) {
+private fun AppGroupCard(group: AppEventGroup, onRestore: (String) -> Unit, content: (String) -> Flow<EventContent?>) {
     var expanded by remember(group.packageName) { mutableStateOf(false) }
     val icon = rememberAppIcon(group.packageName)
 
@@ -283,7 +292,7 @@ private fun AppGroupCard(group: AppEventGroup, onRestore: (String) -> Unit) {
                     modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                EventDetail(entity, onRestore)
+                EventDetail(entity, onRestore, content)
             }
 
             if (hidden > 0 || expanded) {
@@ -402,11 +411,11 @@ private fun CollectedCard(total: Int) {
 }
 
 @Composable
-private fun EventDetail(entity: MessageEventEntity, onRestore: (String) -> Unit) {
+private fun EventDetail(entity: EventSummary, onRestore: (String) -> Unit, content: (String) -> Flow<EventContent?>) {
     // 内容默认折叠 —— 事件页是"看判断结果"的地方，不是"读消息"的地方。
     // 默认展开意味着任何一次截屏都会把通知/短信正文一起带走。
     var revealed by remember(entity.id) { mutableStateOf(false) }
-    val hasContent = !entity.title.isNullOrBlank() || entity.body.isNotBlank()
+    val hasContent = entity.hasContent
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -456,15 +465,18 @@ private fun EventDetail(entity: MessageEventEntity, onRestore: (String) -> Unit)
         }
 
         if (revealed) {
-            val title = entity.title
+            val contentFlow = remember(entity.id) { content(entity.id) }
+            val loaded by contentFlow.collectAsStateWithLifecycle(initialValue = null)
+            val title = loaded?.title
+            val body = loaded?.body.orEmpty()
             if (!title.isNullOrBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(title, style = MaterialTheme.typography.bodyMedium)
             }
-            if (entity.body.isNotBlank()) {
+            if (body.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    entity.body,
+                    body,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = CONTENT_MAX_LINES,
                     overflow = TextOverflow.Ellipsis,
@@ -506,7 +518,7 @@ private fun EventDetail(entity: MessageEventEntity, onRestore: (String) -> Unit)
 private const val CONTENT_MAX_LINES = 4
 
 @Composable
-private fun DecisionLine(entity: MessageEventEntity) {
+private fun DecisionLine(entity: EventSummary) {
     val action = entity.action ?: return
 
     val (label, color) = when (action) {

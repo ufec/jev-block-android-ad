@@ -1,7 +1,9 @@
 package me.ethanxu.jevnoisegate.core.pipeline
 
 import me.ethanxu.jevnoisegate.core.common.Clock
-import me.ethanxu.jevnoisegate.core.common.SystemClock
+import me.ethanxu.jevnoisegate.core.common.MonotonicClock
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.DecisionInput
 import me.ethanxu.jevnoisegate.core.decision.DecisionMapper
@@ -24,6 +26,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 data class PipelineResult(
     val decision: FinalDecision,
     val backendAttempted: Boolean,
+    val queueMs: Long = 0,
+    val backendMs: Long = 0,
 )
 
 /**
@@ -38,7 +42,7 @@ data class PipelineResult(
  */
 class MessagePipeline(
     private val backend: DecisionBackend,
-    private val clock: Clock = SystemClock,
+    private val clock: Clock = MonotonicClock,
     private val deadlineMs: Long = 15_000L,
     maxConcurrentRequests: Int = 4,
 ) {
@@ -66,24 +70,40 @@ class MessagePipeline(
         // ② 交给后端。只在这一段计时 —— 它才是"能否跑赢震动"所关心的那个数字。
         val startedAt = clock.nowMillis()
         var attempted = false
-        val outcome = withTimeoutOrNull(deadlineMs) {
+        var queueMs = 0L
+        var backendMs = 0L
+        PerformanceMetrics.queued()
+        val outcome = try { withTimeoutOrNull(deadlineMs) {
             requests.withPermit {
                 attempted = true
+                queueMs = (clock.nowMillis() - startedAt).coerceAtLeast(0)
+                val backendStarted = clock.nowMillis()
+                PerformanceMetrics.acquired()
                 try {
                     backend.decide(input)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     BackendOutcome.Failed(FailureReason.INVALID_RESPONSE, error.message)
+                } finally {
+                    backendMs = (clock.nowMillis() - backendStarted).coerceAtLeast(0)
+                    PerformanceMetrics.finished()
                 }
             }
         } ?: BackendOutcome.Failed(FailureReason.TIMEOUT)
-        val elapsed = clock.nowMillis() - startedAt
+        } finally { if (!attempted) PerformanceMetrics.dequeued() }
+        val elapsed = (clock.nowMillis() - startedAt).coerceAtLeast(0)
+        if (!attempted) queueMs = elapsed
+        if (outcome is BackendOutcome.Failed && outcome.reason == FailureReason.TIMEOUT) {
+            PerformanceMetrics.increment(if (attempted) PerformanceCounter.BACKEND_TIMEOUT else PerformanceCounter.QUEUE_TIMEOUT)
+        }
 
         // ③ 映射为动作。fail-open 在这里落地，所有不确定路径一律放行。
         return PipelineResult(
             decision = DecisionMapper.map(input, outcome, elapsed),
             backendAttempted = attempted,
+            queueMs = queueMs,
+            backendMs = backendMs,
         )
     }
 }

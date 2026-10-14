@@ -13,6 +13,9 @@ import me.ethanxu.jevnoisegate.core.dispatch.DecisionDispatcher
 import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.model.EventSource
 import me.ethanxu.jevnoisegate.core.model.MessageEvent
+import me.ethanxu.jevnoisegate.core.common.AndroidMonotonicClock
+import me.ethanxu.jevnoisegate.core.common.DecisionTrace
+import me.ethanxu.jevnoisegate.core.common.sameBootIngress
 
 @HiltWorker
 class SmsDecisionWorker @AssistedInject constructor(
@@ -23,13 +26,22 @@ class SmsDecisionWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val id = inputData.getString(EVENT_ID) ?: return Result.failure()
+        val workerStarted = AndroidMonotonicClock.nowMillis()
         return try {
+            val loadStarted = AndroidMonotonicClock.nowMillis()
             val stored = dao.find(id) ?: return Result.success()
+            val loadMs = AndroidMonotonicClock.nowMillis() - loadStarted
             if (stored.action != null) return Result.success()
+            val ingress = sameBootIngress(stored.bootCount, AndroidMonotonicClock.bootCount(applicationContext),
+                stored.ingressElapsedMs, workerStarted)
+            val trace = DecisionTrace(clock = AndroidMonotonicClock, startedMs = workerStarted, ingressMs = ingress,
+                workerWaitMs = ingress?.let { workerStarted - it })
+            trace.addDatabaseElapsed(loadMs)
             val event = MessageEvent(stored.id, EventSource.SMS, stored.timestampMs, stored.packageName,
                 stored.channelId, stored.senderKey, stored.title, stored.body)
-            val decision = dispatcher.dispatch(event)
+            val decision = dispatcher.dispatch(event, trace = trace)
             if (decision.action != Action.ALLOW) SmsNotificationSuppressor.suppress(event.senderKey, event.body)
+            trace.complete()
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled

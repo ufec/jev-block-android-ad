@@ -10,7 +10,27 @@ import me.ethanxu.jevnoisegate.core.decision.*
 import me.ethanxu.jevnoisegate.core.model.*
 import kotlin.test.*
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MessagePipelineTest {
+    @Test fun `queue and backend durations split and gauges return to zero after timeouts`() = runTest {
+        val clock = me.ethanxu.jevnoisegate.core.common.Clock { testScheduler.currentTime }
+        val backend = object : DecisionBackend {
+            override suspend fun decide(input: DecisionInput): BackendOutcome {
+                delay(50)
+                return BackendOutcome.Decided("正常", 1f)
+            }
+        }
+        val pipeline = MessagePipeline(backend, clock, deadlineMs = 75, maxConcurrentRequests = 1)
+        val results = listOf(async { pipeline.process(input("普通消息A")) }, async { pipeline.process(input("普通消息B")) }).awaitAll()
+        assertEquals(0L, results[0].queueMs)
+        assertEquals(50L, results[0].backendMs)
+        assertEquals(50L, results[1].queueMs)
+        assertEquals(25L, results[1].backendMs)
+        assertEquals(FailureReason.TIMEOUT, results[1].decision.failureReason)
+        val snapshot = me.ethanxu.jevnoisegate.core.common.PerformanceMetrics.snapshot()
+        assertEquals(0, snapshot.active)
+        assertEquals(0, snapshot.waiting)
+    }
     private fun input(body: String, title: String? = null, blacklist: List<String> = emptyList()) = DecisionInput(
         MessageEvent("1", EventSource.SMS, 1, "sms", senderKey = "10691234", title = title, body = body),
         ChannelContext("sms", null), DefaultCategories.all(), smsSenderBlacklist = blacklist,

@@ -20,15 +20,21 @@ import kotlinx.coroutines.withTimeout
 import me.ethanxu.jevnoisegate.core.common.log.AppLog
 import me.ethanxu.jevnoisegate.core.common.log.LogCategory
 import me.ethanxu.jevnoisegate.core.data.ObservedEventDao
+import me.ethanxu.jevnoisegate.core.data.EventRetention
 import me.ethanxu.jevnoisegate.core.dispatch.DecisionDispatcher
+import me.ethanxu.jevnoisegate.core.common.AndroidMonotonicClock
+import me.ethanxu.jevnoisegate.core.common.DecisionTrace
 
 @AndroidEntryPoint
 class SmsReceiver : BroadcastReceiver() {
     @Inject lateinit var dao: ObservedEventDao
     @Inject lateinit var dispatcher: DecisionDispatcher
+    @Inject lateinit var retention: EventRetention
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+        val ingressMs = AndroidMonotonicClock.nowMillis()
+        val bootCount = AndroidMonotonicClock.bootCount(context)
         val raw = runCatching {
             Telephony.Sms.Intents.getMessagesFromIntent(intent).map {
                 RawSms(it.originatingAddress, it.messageBody.orEmpty(), it.timestampMillis)
@@ -40,14 +46,15 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 withTimeout(8_000L) {
                     for (event in SmsEventFactory.eventsFrom(raw)) {
-                        ingestSms(event, dao, { dispatcher.dispatchLocal(it) }, { id ->
+                        val trace = DecisionTrace(clock = AndroidMonotonicClock, startedMs = ingressMs)
+                        ingestSms(event, dao, { dispatcher.dispatchLocal(it, trace = trace) }, { id ->
                             val work = OneTimeWorkRequestBuilder<SmsDecisionWorker>()
                                 .setInputData(workDataOf(SmsDecisionWorker.EVENT_ID to id)).build()
                             WorkManager.getInstance(context.applicationContext)
                                 .enqueueUniqueWork("sms:$id", ExistingWorkPolicy.KEEP, work).await()
-                        })
+                        }, trace = trace, ingressElapsedMs = ingressMs, bootCount = bootCount)
                     }
-                    dao.prune(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
+                    retention.request()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

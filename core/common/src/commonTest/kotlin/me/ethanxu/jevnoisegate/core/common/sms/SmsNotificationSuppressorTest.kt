@@ -4,6 +4,17 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class SmsNotificationSuppressorTest {
+    @Test fun `restoring 128 unmatched decisions makes only one batch retry`() {
+        val pending = PendingSmsSuppressions { 1L }
+        var rounds = 0
+        var entries = 0
+        pending.attachBatch { rounds++; entries = it.size; emptySet() }
+        pending.restore((0..127).map { PendingSmsSuppression("1069", "message-$it", 100) })
+        assertEquals(1, rounds)
+        assertEquals(128, entries)
+        pending.retryPending()
+        assertEquals(2, rounds)
+    }
     @Test fun `entries that expire while an earlier callback runs cannot cancel notifications`() {
         var now = 1L
         val pending = PendingSmsSuppressions { now }

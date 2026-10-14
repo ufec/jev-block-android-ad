@@ -38,6 +38,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import me.ethanxu.jevnoisegate.app.LatencyStats
 import me.ethanxu.jevnoisegate.app.MainViewModel
 import me.ethanxu.jevnoisegate.core.data.ActionCount
+import me.ethanxu.jevnoisegate.core.common.PerformanceSnapshot
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 
 @Composable
 fun DiagnosticsScreen(
@@ -48,6 +50,7 @@ fun DiagnosticsScreen(
     val prefs by settings.preferences.collectAsStateWithLifecycle()
     val devMode = prefs.developerMode
     val latency by viewModel.latencyStats.collectAsStateWithLifecycle()
+    val performance by viewModel.performance.collectAsStateWithLifecycle()
     val actionCounts by viewModel.actionCounts.collectAsStateWithLifecycle()
     val attempted by viewModel.backendAttemptCount.collectAsStateWithLifecycle()
     val total by viewModel.totalCount.collectAsStateWithLifecycle()
@@ -58,6 +61,7 @@ fun DiagnosticsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { LatencyCard(latency) }
+        item { PerformanceCard(performance) }
         item { ActionCard(actionCounts) }
         item { PrivacyCard(attempted = attempted, total = total) }
         item { LogEntryCard(onClick = { navigator.push(Route.Logs) }) }
@@ -74,11 +78,10 @@ fun DiagnosticsScreen(
 private fun LatencyCard(latency: LatencyStats) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("模型往返延迟", style = MaterialTheme.typography.titleMedium)
+            Text("模型阶段延迟（含排队）", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "P95 才是决定体验的那个数 —— 用户感知到的是尾部延迟，而不是平均值。" +
-                    "它同时也是「网络往返能否跑赢通知震动」的直接答案。",
+                "最近 1,000 条模型或降级结果，包含排队、客户端准备与请求重试；不含采集、数据库前处理和撤销。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -103,6 +106,39 @@ private fun LatencyCard(latency: LatencyStats) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PerformanceCard(snapshot: PerformanceSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("处理性能", style = MaterialTheme.typography.titleMedium)
+            Text("当前进程最近 256 条已完成事件。数据库耗时包含等待；各阶段存在重叠，不应相加。",
+                style = MaterialTheme.typography.bodySmall)
+            listOf("收到至处理完成" to snapshot.endToEnd, "请求前处理" to snapshot.preparation,
+                "数据库等待" to snapshot.database, "请求排队" to snapshot.queue,
+                "后端判断" to snapshot.backend, "短信任务调度" to snapshot.workerWait).forEach { (name, stats) ->
+                Text(if (stats.count == 0) "$name：暂无样本"
+                    else "$name：P50 ${stats.p50} / P95 ${stats.p95} / 最大 ${stats.max} ms（${stats.count} 条）",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Text("请求 ${snapshot.active} 个运行 / ${snapshot.waiting} 个等待；峰值 ${snapshot.peakActive} / ${snapshot.peakWaiting}",
+                style = MaterialTheme.typography.bodySmall)
+            val names = mapOf(
+                PerformanceCounter.OVERLOAD to "通知过载放行", PerformanceCounter.CANCELLED to "通知任务取消",
+                PerformanceCounter.QUEUE_TIMEOUT to "排队超时", PerformanceCounter.BACKEND_TIMEOUT to "后端超时",
+                PerformanceCounter.SMS_OWNED to "短信关联复用", PerformanceCounter.SMS_OWNER_FALLBACK to "短信通知独立判断",
+                PerformanceCounter.CLIENT_CREATED to "网络客户端创建", PerformanceCounter.SMS_SNAPSHOT to "短信匹配快照",
+                PerformanceCounter.RETENTION_RUN to "保留清理", PerformanceCounter.SETTINGS_WRITE to "设置写盘",
+                PerformanceCounter.SETTINGS_ENCRYPT to "凭据加密", PerformanceCounter.LOG_WRITE to "日志批量写盘",
+            )
+            names.forEach { (counter, name) ->
+                Text("$name：${snapshot.counters[counter] ?: 0}", style = MaterialTheme.typography.bodySmall)
+            }
+            Text("统计重启后重置。端到端包含判定写回及当前入口的动作提交；短信通知稍后匹配、系统实际撤销时间不计入。跨设备重启的短信任务不报告原始起点耗时。",
+                style = MaterialTheme.typography.bodySmall)
         }
     }
 }

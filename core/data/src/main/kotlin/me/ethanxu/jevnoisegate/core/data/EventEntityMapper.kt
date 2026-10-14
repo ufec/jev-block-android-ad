@@ -15,7 +15,12 @@ import me.ethanxu.jevnoisegate.core.model.bucketKey
 fun MessageEvent.toEntity(
     appLabel: String? = null,
     channelLabel: String? = null,
-): MessageEventEntity = MessageEventEntity(
+    capturedAtMs: Long = System.currentTimeMillis(),
+    ingressElapsedMs: Long? = null,
+    bootCount: Int? = null,
+): MessageEventEntity {
+    val skeleton = Fingerprint.skeletonOf(body)
+    return MessageEventEntity(
     id = id,
     source = source.name,
     timestampMs = timestampMs,
@@ -27,6 +32,10 @@ fun MessageEvent.toEntity(
     title = title,
     body = body,
     bucketKey = bucketKey,
-    fingerprint = Fingerprint.of(this),
-    skeleton = Fingerprint.skeletonOf(body),
+    fingerprint = Fingerprint.ofSkeleton(bucketKey, skeleton),
+    skeleton = skeleton,
+    capturedAtMs = capturedAtMs,
+    ingressElapsedMs = ingressElapsedMs,
+    bootCount = bootCount,
 )
+}

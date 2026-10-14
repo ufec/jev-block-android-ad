@@ -21,7 +21,9 @@ object Fingerprint {
      * （`commonMain` 里没有 SHA-1），且跨平台结果完全确定。
      */
     fun of(bucketKey: String, body: String): String =
-        fnv1a64("$bucketKey|${TextNormalizer.normalize(body)}")
+        ofSkeleton(bucketKey, TextNormalizer.normalize(body))
+
+    fun ofSkeleton(bucketKey: String, skeleton: String): String = fnv1a64("$bucketKey|$skeleton")
 
     /** 便捷重载：直接对事件计算，分桶键由事件自身推导。 */
     fun of(event: MessageEvent): String = of(event.bucketKey, event.body)

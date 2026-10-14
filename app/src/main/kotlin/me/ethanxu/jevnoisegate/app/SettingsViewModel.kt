@@ -66,6 +66,23 @@ class SettingsViewModel @Inject constructor(
 
     private val _proxySave = MutableStateFlow(ProxySaveState())
     val proxySave: StateFlow<ProxySaveState> = _proxySave.asStateFlow()
+    private val _apiSave = MutableStateFlow(ProxySaveState())
+    val apiSave: StateFlow<ProxySaveState> = _apiSave.asStateFlow()
+
+    fun saveApiSettings(apiKey: String, baseUrl: String, model: String, timeoutMs: Long) {
+        if (_apiSave.value.running) return
+        _apiSave.value = ProxySaveState(running = true)
+        viewModelScope.launch {
+            try {
+                repository.saveApiSettings(apiKey, baseUrl, model, timeoutMs)
+                _apiSave.value = ProxySaveState(saved = true, message = "API 设置已保存")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                _apiSave.value = ProxySaveState(saved = false, message = "保存失败：${failure.message ?: "请稍后重试"}")
+            }
+        }
+    }
 
     fun setColorMode(value: Int) = launchSetting { repository.setColorMode(value) }
 

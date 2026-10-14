@@ -11,6 +11,7 @@ import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.DefaultCategories
 import me.ethanxu.jevnoisegate.core.decision.applyCategoryOverrides
 import me.ethanxu.jevnoisegate.core.pipeline.MessagePipeline
+import me.ethanxu.jevnoisegate.core.common.AndroidMonotonicClock
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -19,7 +20,7 @@ object DispatchModule {
     @Provides
     @Singleton
     fun provideMessagePipeline(backend: DecisionBackend): MessagePipeline =
-        MessagePipeline(backend)
+        MessagePipeline(backend, clock = AndroidMonotonicClock)
 
     /**
      * 出厂分类 + 用户在设置里做的覆盖。

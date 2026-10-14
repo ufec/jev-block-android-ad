@@ -1,5 +1,7 @@
 package me.ethanxu.jevnoisegate.core.common.sms
 
+data class PendingSmsSuppression(val sender: String?, val body: String, val expiresAtMs: Long)
+
 /**
  * 短信通知的撤销入口。
  *
@@ -30,6 +32,7 @@ object SmsNotificationSuppressor {
     private val pending = PendingSmsSuppressions()
 
     fun attach(impl: (sender: String?, body: String) -> Boolean) = pending.attach(impl)
+    fun attachBatch(impl: (List<PendingSmsSuppression>) -> Set<PendingSmsSuppression>) = pending.attachBatch(impl)
     fun detach() = pending.detach()
 
     /** 找不到对应通知时保留至 expiresAtMs；默认六十秒，最多保存 128 条。 */
@@ -37,6 +40,7 @@ object SmsNotificationSuppressor {
         pending.suppress(sender, body, expiresAtMs)
 
     fun retryPending() = pending.retryPending()
+    fun restore(entries: List<PendingSmsSuppression>) = pending.restore(entries)
 }
 
 internal class PendingSmsSuppressions(
@@ -45,12 +49,17 @@ internal class PendingSmsSuppressions(
 
     /** 由通知监听服务在连接时注册、断开时注销。 */
     @Volatile
-    private var canceller: ((sender: String?, body: String) -> Boolean)? = null
-    private data class Entry(val sender: String?, val body: String, val expiresAtMs: Long)
-    private val pending = LinkedHashMap<Pair<String?, String>, Entry>()
+    private var canceller: ((List<PendingSmsSuppression>) -> Set<PendingSmsSuppression>)? = null
+    private val pending = LinkedHashMap<Pair<String?, String>, PendingSmsSuppression>()
     private val lock = Any()
 
     fun attach(impl: (sender: String?, body: String) -> Boolean) {
+        attachBatch { entries -> entries.filter { entry ->
+            isCurrent(entry) && impl(entry.sender, entry.body)
+        }.toSet() }
+    }
+
+    fun attachBatch(impl: (List<PendingSmsSuppression>) -> Set<PendingSmsSuppression>) {
         canceller = impl
         retryPending()
     }
@@ -60,14 +69,19 @@ internal class PendingSmsSuppressions(
     }
 
     fun suppress(sender: String?, body: String, expiresAtMs: Long = nowMillis() + 60_000L) {
-        if (body.isBlank()) return
-        if (expiresAtMs <= nowMillis()) return
+        restore(listOf(PendingSmsSuppression(sender, body, expiresAtMs)))
+    }
+
+    fun restore(entries: List<PendingSmsSuppression>) {
         synchronized(lock) {
-            val key = sender to body
-            val expiry = maxOf(pending[key]?.expiresAtMs ?: 0L, expiresAtMs)
-            // A replay of an older database row must not shorten a fresh decision.
-            pending.remove(key)
-            pending[key] = Entry(sender, body, expiry)
+            val now = nowMillis()
+            entries.forEach { entry ->
+                if (entry.body.isBlank() || entry.expiresAtMs <= now) return@forEach
+                val key = entry.sender to entry.body
+                val expiry = maxOf(pending[key]?.expiresAtMs ?: 0L, entry.expiresAtMs)
+                pending.remove(key)
+                pending[key] = entry.copy(expiresAtMs = expiry)
+            }
             while (pending.size > 128) {
                 pending.remove(pending.keys.first())
             }
@@ -80,16 +94,20 @@ internal class PendingSmsSuppressions(
         val snapshot = synchronized(lock) {
             val now = nowMillis()
             pending.entries.removeAll { it.value.expiresAtMs <= now }
-            pending.toMap()
+            pending.values.toList()
         }
-        snapshot.forEach { (key, entry) ->
-            val current = synchronized(lock) {
-                pending[key] === entry && entry.expiresAtMs > nowMillis()
-            }
-            if (current && impl(entry.sender, entry.body)) synchronized(lock) {
+        if (snapshot.isEmpty()) return
+        val accepted = impl(snapshot.filter(::isCurrent))
+        snapshot.forEach { entry ->
+            val key = entry.sender to entry.body
+            if (entry in accepted) synchronized(lock) {
                 // The callback may have accepted a newer decision for this same content.
                 if (pending[key] === entry) pending.remove(key)
             }
         }
+    }
+
+    private fun isCurrent(entry: PendingSmsSuppression): Boolean = synchronized(lock) {
+        pending[entry.sender to entry.body] === entry && entry.expiresAtMs > nowMillis()
     }
 }

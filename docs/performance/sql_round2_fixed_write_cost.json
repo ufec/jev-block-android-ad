@@ -1,0 +1,275 @@
+{
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "scope": "Desktop SQLite in memory, warm synthetic 1 KiB bodies; no Room, Binder, disk, network or device measurements.",
+  "schema_version": 5,
+  "revision": "working-tree",
+  "samples": [
+    {
+      "rows": 1000,
+      "allocated_bytes": 1617920,
+      "ingestion_median_ms_20_runs": 0.0258,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "vm_steps": 17028,
+          "result_rows": 0,
+          "median_ms_20_runs": 1.4219
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_source_decidedAtMs (source=? AND decidedAtMs>?)"
+          ],
+          "vm_steps": 182,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.0424
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_action_timestampMs_id_uploaded (action=?)"
+          ],
+          "vm_steps": 3018,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.9618
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded (action=?)"
+          ],
+          "vm_steps": 762,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0205
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_packageName_channelId",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 8421,
+          "result_rows": 10,
+          "median_ms_20_runs": 0.2133
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded (action>?)"
+          ],
+          "vm_steps": 7048,
+          "result_rows": 2,
+          "median_ms_20_runs": 0.102
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded"
+          ],
+          "vm_steps": 4013,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0846
+        },
+        "channelStats": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 74,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0105
+        },
+        "eventCount": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 9,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0036
+        },
+        "trimOldest": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 124,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.1125
+        },
+        "pruneExpired": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_timestampMs (timestampMs<?)"
+          ],
+          "vm_steps": 23,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.0063
+        },
+        "observeOverview": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded"
+          ],
+          "vm_steps": 20026,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.3029
+        },
+        "observeQuarantineBefore": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_action_timestampMs_id_uploaded (action=? AND (timestampMs,id)<(?,?))"
+          ],
+          "vm_steps": 3484,
+          "result_rows": 101,
+          "median_ms_20_runs": 0.9441
+        },
+        "observeSmsOwners": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_source_capturedAtMs (source=? AND capturedAtMs>?)"
+          ],
+          "vm_steps": 410,
+          "result_rows": 12,
+          "median_ms_20_runs": 0.1038
+        }
+      }
+    },
+    {
+      "rows": 10000,
+      "allocated_bytes": 15548416,
+      "ingestion_median_ms_20_runs": 0.161,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "vm_steps": 170027,
+          "result_rows": 0,
+          "median_ms_20_runs": 17.9819
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_source_decidedAtMs (source=? AND decidedAtMs>?)"
+          ],
+          "vm_steps": 182,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.0354
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_action_timestampMs_id_uploaded (action=?)"
+          ],
+          "vm_steps": 3018,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.6069
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded (action=?)"
+          ],
+          "vm_steps": 7512,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.1774
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_packageName_channelId",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 80421,
+          "result_rows": 10,
+          "median_ms_20_runs": 1.6743
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded (action>?)"
+          ],
+          "vm_steps": 70048,
+          "result_rows": 2,
+          "median_ms_20_runs": 1.1477
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded"
+          ],
+          "vm_steps": 40013,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.83
+        },
+        "channelStats": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 74,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0074
+        },
+        "eventCount": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 9,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0035
+        },
+        "trimOldest": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 123,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.1102
+        },
+        "pruneExpired": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_timestampMs (timestampMs<?)"
+          ],
+          "vm_steps": 23,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.006
+        },
+        "observeOverview": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX index_observed_event_action_timestampMs_id_uploaded"
+          ],
+          "vm_steps": 200026,
+          "result_rows": 1,
+          "median_ms_20_runs": 3.5241
+        },
+        "observeQuarantineBefore": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_action_timestampMs_id_uploaded (action=? AND (timestampMs,id)<(?,?))"
+          ],
+          "vm_steps": 3484,
+          "result_rows": 101,
+          "median_ms_20_runs": 0.9712
+        },
+        "observeSmsOwners": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_source_capturedAtMs (source=? AND capturedAtMs>?)"
+          ],
+          "vm_steps": 410,
+          "result_rows": 12,
+          "median_ms_20_runs": 0.0735
+        }
+      }
+    }
+  ]
+}

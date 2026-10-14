@@ -61,12 +61,13 @@ import me.ethanxu.jevnoisegate.ui.component.SegmentedRadioItem
  * 首次组合会把空串当成草稿，随后到达的真实值又被"用户已编辑"的语义挡住 ——
  * 结果是已配置的 key 显示为空。
  *
- * 因此这里显式等待第一次真实发射再初始化草稿，之后由草稿驱动输入、逐次落盘。
+ * 因此这里显式等待真实配置再初始化草稿，整份表单在点击保存时原子提交。
  */
 @Composable
 fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     val test by viewModel.connectionTest.collectAsStateWithLifecycle()
+    val save by viewModel.apiSave.collectAsStateWithLifecycle()
 
     var initialized by remember { mutableStateOf(false) }
     var apiKey by remember { mutableStateOf("") }
@@ -132,7 +133,6 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         value = apiKey,
                         onValueChange = {
                             apiKey = it
-                            viewModel.setApiKey(it.trim())
                         },
                         label = "API Key",
                         visualTransformation = if (keyVisible) {
@@ -164,7 +164,6 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         value = baseUrl,
                         onValueChange = {
                             baseUrl = it
-                            if (isValidBaseUrl(it.trim())) viewModel.setBaseUrl(it.trim())
                         },
                         label = "Base URL",
                     )
@@ -177,7 +176,6 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         value = model,
                         onValueChange = {
                             model = it
-                            viewModel.setModel(it.trim())
                         },
                         models = test.models,
                     )
@@ -189,11 +187,22 @@ fun JevApiSettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             // 只接受数字：非法输入直接忽略，避免把异常值写进设置。
                             val digits = input.filter { it.isDigit() }.take(6)
                             timeout = digits
-                            digits.toLongOrNull()?.takeIf { it > 0 }?.let(viewModel::setTimeoutMs)
                         },
                         label = "超时（毫秒）",
                         keyboardType = KeyboardType.Number,
                     )
+                }
+                item {
+                    Column(Modifier.padding(16.dp)) {
+                        val timeoutMs = timeout.toLongOrNull()
+                        Button(onClick = {
+                            viewModel.saveApiSettings(apiKey.trim(), baseUrl.trim(), model.trim(), timeoutMs ?: 1_000L)
+                        }, enabled = !save.running && isValidBaseUrl(baseUrl.trim()) && timeoutMs != null && timeoutMs > 0) {
+                            Text(if (save.running) "正在保存…" else "保存 API 设置")
+                        }
+                        Text("编辑完成后保存；连接测试使用当前输入。", style = MaterialTheme.typography.bodySmall)
+                        save.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }

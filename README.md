@@ -3,6 +3,9 @@
 An Android noise gate for notifications and SMS.
 
 Project review and fixes: [review](docs/PROJECT_REVIEW.md), [fixes and validation](docs/FIXES.md).
+Performance: [original review](docs/PERFORMANCE_REVIEW.md), [implemented fixes and measurements](docs/PERFORMANCE_FIXES.md).
+Further performance findings: [second review](docs/PERFORMANCE_REVIEW_ROUND2.md).
+Second-round fixes: [implementation, regression tests and measurements](docs/PERFORMANCE_FIXES_ROUND2.md).
 
 Rule-based blockers are brittle in both directions: a keyword list that
 catches ads will eventually swallow a verification code, and it will never
@@ -107,7 +110,7 @@ callback.
 
 Each notification key has a generation. A result for an older message cannot
 cancel an updated or reposted message. Model work is limited to four concurrent
-requests and a 15-second total deadline, including queueing and retries. At
+requests and a 15-second model-stage deadline, including queueing and retries. At
 most 64 notification decisions remain in flight; overload passes through.
 
 ### Blocking an SMS only removes its notification
@@ -126,6 +129,12 @@ budget. Model decisions run as unique persistent WorkManager jobs. Suppression
 requests wait up to 60 seconds for a matching notification. Ambiguous matches
 and grouped notifications stay visible to protect unrelated messages.
 
+With SMS permission, the listener waits up to one second for a uniquely matching
+captured SMS to own the decision, including pending and allowed decisions. If
+capture is missing or the match is ambiguous, notification processing continues.
+This prevents duplicate model calls for correlated messages; unusual formatting
+or late capture can still use the notification fallback.
+
 ### Quarantine and recovery
 
 The event screen has a paginated quarantine view. Recovery posts a new
@@ -135,9 +144,17 @@ does not recreate the original app's notification buttons or pending intents.
 Notification permission is required to post the recovery notification.
 Silent suppression retains an audit event but offers no recovery action.
 
-Events are retained for 30 days, with a maximum of 10,000 rows. User corrections
-survive event cleanup. Latency statistics use the most recent 1,000 decisions.
-Database upgrades from version 2 preserve existing history.
+Event inserts enforce a maximum of 10,000 rows. Age maintenance removes events
+older than 30 days in the background when ingestion requests it, at most once
+every five minutes. User corrections survive cleanup. Database upgrades from
+versions 2 and 3 to version 4 preserve existing history.
+
+Diagnostics show historical model-stage latency for the most recent 1,000
+MODEL/FALLBACK decisions, plus stage timings for the last 256 completed samples
+in the current process. End-to-end timing ends when a decision or cancellation
+is submitted; later SMS notification matching and Android's actual removal time
+are excluded. Worker scheduling and original ingress timing are unavailable
+across a device reboot.
 
 ---
 
@@ -214,7 +231,8 @@ settings persistence, notification extraction and database migration tests.
 1. Grant notification access (Settings → Notifications → Notification access).
    The app cannot do this for itself.
 2. Grant SMS permission if you want the SMS path.
-3. Open **Settings → JevAPI**, enter your key, and press **Test connection**.
+3. Open **Settings → JevAPI**, enter your key, press **Test connection**, then
+   **保存 API 设置** to save the form.
    A valid key is required — without one every decision fails open and nothing
    is ever blocked.
 
@@ -228,7 +246,7 @@ settings persistence, notification extraction and database migration tests.
 
 | Setting | Notes |
 |---|---|
-| API key, base URL, model, timeout | Required for real decisions. The model list can be fetched from the backend. |
+| API key, base URL, model, timeout | Save the API form explicitly. Saved network settings take effect on the next decision; matching configurations reuse the client. The model list can be fetched from the backend. |
 | Network proxy | HTTP / HTTPS / SOCKS5. HTTP and HTTPS map to the same implementation — HTTPS targets tunnel through CONNECT. Saved changes take effect on the next decision. |
 | User rules | Plain-language preferences, injected into the model state. Soft constraints. |
 | SMS blacklist | Numbers, prefix or suffix matched, evaluated before the model. Hard rule. |
@@ -242,8 +260,10 @@ settings persistence, notification extraction and database migration tests.
 API keys and proxy credentials are encrypted in Preferences DataStore using
 AES-GCM and a device-bound Android Keystore key. Legacy plaintext credentials
 are migrated on first load. Missing or unreadable settings fail open and are
-reported in the settings screen. Writes are persisted in the same order as
-in-memory changes; accepted writes survive cancellation of their UI caller.
+reported in the settings screen. A bounded writer coalesces cumulative settings
+snapshots and preserves the latest accepted state; intermediate snapshots may
+be skipped. Accepted writes survive cancellation of their UI caller. Unchanged
+credentials keep their existing ciphertext.
 
 Application data is excluded from cloud backup and device transfer. Full
 message text remains in the private event database for the retention period;

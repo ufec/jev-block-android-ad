@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.ethanxu.jevnoisegate.app.BuildConfig
+import me.ethanxu.jevnoisegate.app.ClientLeasePool
 import me.ethanxu.jevnoisegate.app.verifiedProxySpecOrNull
 import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
 import me.ethanxu.jevnoisegate.core.decision.BackendOutcome
@@ -19,6 +20,8 @@ import me.ethanxu.jevnoisegate.core.decision.TypeSafeBackend
 import me.ethanxu.jevnoisegate.core.model.FailureReason
 import me.ethanxu.typesafe.sdk.TypeSafeClient
 import me.ethanxu.typesafe.sdk.TypeSafeConfig
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 
 /** Each request uses the current saved settings; missing credentials fail open. */
 @Module
@@ -27,14 +30,20 @@ object BackendModule {
     @Provides
     @Singleton
     fun provideDecisionBackend(settings: SettingsRepository): DecisionBackend = object : DecisionBackend {
+        private val clients = ClientLeasePool<TypeSafeConfig, TypeSafeClient> {
+            TypeSafeClient(it).also { PerformanceMetrics.increment(PerformanceCounter.CLIENT_CREATED) }
+        }
         override suspend fun decide(input: DecisionInput): BackendOutcome = withContext(Dispatchers.IO) {
             settings.awaitReady()
             val prefs = settings.preferences.value
             // The BuildConfig fallback is populated only in debug builds.
             val key = prefs.apiKey.ifBlank { BuildConfig.TYPESAFE_API_KEY }
-            if (key.isBlank()) return@withContext BackendOutcome.Failed(FailureReason.NOT_CONFIGURED)
+            if (key.isBlank()) {
+                clients.invalidate()
+                return@withContext BackendOutcome.Failed(FailureReason.NOT_CONFIGURED)
+            }
             try {
-                val client = TypeSafeClient(TypeSafeConfig(
+                val lease = clients.acquire(TypeSafeConfig(
                     apiKey = key,
                     baseUrl = prefs.baseUrl,
                     defaultModel = prefs.model,
@@ -43,9 +52,9 @@ object BackendModule {
                     proxy = verifiedProxySpecOrNull(prefs),
                 ))
                 try {
-                    TypeSafeBackend(client).decide(input)
+                    TypeSafeBackend(lease.client).decide(input)
                 } finally {
-                    client.close()
+                    lease.close()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

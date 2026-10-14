@@ -34,19 +34,26 @@ class DatabaseMigrationTest {
             old.version = 2
         }
         val db = Room.databaseBuilder(context, JevNoiseGateDatabase::class.java, name)
-            .addMigrations(DatabaseModule.MIGRATION_2_3).allowMainThreadQueries().build()
+            .addMigrations(DatabaseModule.MIGRATION_2_3, DatabaseModule.MIGRATION_3_4, DatabaseModule.MIGRATION_4_5).allowMainThreadQueries().build()
         try {
             val dao = db.observedEventDao()
             val old = dao.find("old")!!
             assertEquals("完整正文", old.body)
             assertEquals("QUARANTINE", old.action)
             assertTrue(old.backendAttempted!!)
+            assertEquals(100L, old.capturedAtMs)
+            assertNull(old.ingressElapsedMs)
+            assertNull(old.bootCount)
+            assertEquals(ChannelStats(1, 1), dao.channelStats("bank", "missing"))
+            assertEquals(ChannelStats(0, 0), dao.channelStats("bank", "old"))
             assertNotNull(dao.restore("old", 200))
             assertTrue(dao.isUserAllowed(correctionKey(old.bucketKey, old.title, old.body)))
             assertEquals(0, dao.recordDecision("old", "QUARANTINE", "MODEL", "广告", 1f, null, 100, true))
             assertEquals("USER", dao.find("old")!!.decidedBy)
+            assertEquals(ChannelStats(1, 0), dao.channelStats("bank", "missing"))
             dao.prune(300)
             assertNull(dao.find("old"))
+            assertEquals(ChannelStats(0, 0), dao.channelStats("bank", "missing"))
             assertTrue(dao.isUserAllowed(correctionKey(old.bucketKey, old.title, old.body)))
         } finally {
             db.close()

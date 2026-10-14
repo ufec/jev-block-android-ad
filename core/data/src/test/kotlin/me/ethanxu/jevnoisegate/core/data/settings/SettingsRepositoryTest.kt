@@ -77,6 +77,7 @@ class SettingsRepositoryTest {
         override fun decrypt(value: String) = if (value.startsWith("enc:v1:")) value.removePrefix("enc:v1:").reversed() else value
     }
     private class Store(initial: Preferences = emptyPreferences()) : DataStore<Preferences> {
+        var writes = 0
         val value = MutableStateFlow(initial)
         var loadFailure = false
         var writeFailure = false
@@ -88,10 +89,42 @@ class SettingsRepositoryTest {
             emitAll(value)
         }
         override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences {
+            writes++
             delay(writeDelay)
             if (writeFailure) throw IOException("write")
             return transform(value.value).also { value.value = it }
         }
+    }
+
+    @Test fun `burst snapshots coalesce slow writes and every accepted caller completes`() = runTest {
+        val store = Store()
+        val repo = DataStoreSettingsRepository(store, codec, backgroundScope)
+        repo.awaitReady()
+        store.writeDelay = 100
+        val jobs = (1..200).map { index -> async { repo.setKeyColor(index) } }
+        jobs.forEach { it.await() }
+        assertEquals(200, repo.preferences.value.keyColor)
+        assertEquals(200, store.value.value[androidx.datastore.preferences.core.intPreferencesKey("key_color")])
+        assertTrue("Burst must not create 200 disk writes", store.writes < 20)
+    }
+
+    @Test fun `API form saves once and unrelated changes preserve credential ciphertext`() = runTest {
+        var encryptions = 0
+        val counting = object : SecretCodec {
+            override fun encrypt(value: String): String { encryptions++; return codec.encrypt(value) }
+            override fun decrypt(value: String) = codec.decrypt(value)
+        }
+        val store = Store()
+        val repo = DataStoreSettingsRepository(store, counting, backgroundScope)
+        repo.awaitReady()
+        repo.saveApiSettings("secret", "https://example.com", "model", 5_000)
+        assertEquals(1, store.writes)
+        val ciphertext = store.value.value[stringPreferencesKey("api_key")]
+        repo.setColorMode(2)
+        assertEquals(1, encryptions)
+        assertEquals(ciphertext, store.value.value[stringPreferencesKey("api_key")])
+        repo.setColorMode(2)
+        assertEquals(2, store.writes)
     }
 
     @Test fun `stalled read and legacy migration both release readiness at the deadline`() = runTest {
