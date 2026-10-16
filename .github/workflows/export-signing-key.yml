@@ -92,16 +92,30 @@ jobs:
             -in aes-key.txt -out out/aes-key.enc
 
           rm -f bundle/release.p12 bundle/keystore-password.txt bundle/key-alias.txt aes-key.txt
+
+          # 上传步骤在仓库根目录运行，而产物写在 $RUNNER_TEMP（仓库之外）。
+          # 第一次跑就是因为两边目录不一致，upload-artifact 找不到文件。
+          # 用 $GITHUB_WORKSPACE 下的 stage/ 作中转：它在 repo 内、路径固定，
+          # 对 upload-artifact 就是普通的相对路径。
+          # keystore-info.txt 只含条目名/有效期/算法，不含私钥，一并上传便于本地核对。
+          stage="$GITHUB_WORKSPACE/stage"
+          mkdir -p "$stage"
+          cp out/bundle.enc out/aes-key.enc keystore-info.txt "$stage/"
           echo "encrypted artifacts (plaintext removed):"
-          ls -l out/
+          ls -l "$stage/"
 
       - name: Upload the encrypted bundle
         uses: actions/upload-artifact@v4
         with:
           name: signing-key-encrypted
-          path: |
-            out/bundle.enc
-            out/aes-key.enc
-            keystore-info.txt
+          path: stage/
           if-no-files-found: error
           retention-days: 1
+
+      - name: Remove the staged directory
+        if: always()
+        run: |
+          set -euo pipefail
+          # 密文已在 artifact 里，工作区里的副本删掉，减少残留暴露面。
+          rm -rf "$GITHUB_WORKSPACE/stage"
+          echo "staged ciphertext removed from the workspace"
