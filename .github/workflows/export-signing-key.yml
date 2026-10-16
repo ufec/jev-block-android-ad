@@ -1,0 +1,107 @@
+name: Export signing key (one-off)
+
+# 一次性导出 release 签名密钥的逃生通道。
+#
+# 背景：仓库里这三份 secret 是发布 APK 的唯一签名凭据，GitHub 不会再次回显它们，
+# 本地也找不着备份。这个 workflow 把它们加密后作为 artifact 上传，本地用一条
+# openssl 命令解出来。任务完成后必须删除这个文件，不留常驻通道。
+#
+# 安全边界：本仓库是 public，Actions 的 artifact 接口对匿名请求是可探测的
+# （实测 /actions/artifacts 无凭证即返回 200）。所以密钥绝不裸传 —— runner 内
+# 加密成 "RSA-2048 包裹的 AES-256 密文" 再上传，没有本地 wrap-key.pem 就解不开。
+# 并且 retention-days: 1，artifact 一天后自动过期。
+on:
+  workflow_dispatch:
+
+# 这个 job 只读 secret、不碰仓库内容。收紧到最小。
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # 公钥用 base64 单行内联。选 base64 而不是 heredoc 贴 PEM，是因为
+      # bash heredoc 的结束标记必须顶格才能终止，而 YAML 块标量里每一行
+      # 都要缩进 —— 二者冲突，顶格的 "PEM" 会提前中断整段 run 脚本，
+      # pyYAML 都无法解析。单行 base64 没有换行，也就没有这个问题。
+      # 公钥公开不泄露任何秘密，就算随 artifact 被匿名看到也无所谓。
+      WRAP_PUB_B64: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0NCk1JSUJJakFOQmdrcWhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBdENkQUpPa1IycUlhRVRNb2tjNnUNClFsV21nR1I4SzBMUlJWSjlGc2MvRlA2bjVMVHVDbHpSV09tY3I0ZTlNdm0yeXVpbndGOXllcXAzY2x1dzFQcXkNCmRTbDcxVGFiRjBhSWFNcldHc0xFazNIK3FmNHVzNHdDL3JQOEVPL2JoaU1zRU9nb25LcmRJQS9EdE9lZ0VhYmcNClZhQ013QlNHVHRLblY3S0hReUJQV05Gd3dyMTY3RWJoZVlxNnJ2V3FTeWpUMForc3pnekdadWtYV2RwRVJtdEgNCjVFZjRCVTA3c2xiRW5laDY1N2RnNmV4c2pIWWpuRUdwQzVUQlhadTJxbWpoTkpDQ0grbVY2dk9xOFcrbmQ3R1cNCnJsRmJRNnh0VHZjcWNaTFRUbjJ2KzFvcXp0bW81WVVSWmtBcTRVY2pVUVFldmdGVTJVZlRwNm9oSy9pY1lsYmsNCnp3SURBUUFCDQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0NCg==
+
+    steps:
+      - name: Materialise and encrypt the signing key bundle
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+
+          # 三个 secret 缺一个就直接失败。缺了口令的 keystore 是废的，
+          # 半份密钥不如不导。
+          : "${KEYSTORE_BASE64:?RELEASE_KEYSTORE_BASE64 is empty}"
+          : "${KEYSTORE_PASSWORD:?RELEASE_KEYSTORE_PASSWORD is empty}"
+          : "${KEY_ALIAS:?RELEASE_KEY_ALIAS is empty}"
+
+          work="$RUNNER_TEMP/export"
+          mkdir -p "$work/bundle" "$work/out"
+          cd "$work"
+
+          printf '%s' "$WRAP_PUB_B64" | base64 --decode > wrap-pub.pem
+          openssl pkey -pubin -in wrap-pub.pem -noout
+          echo "wrapping public key is well-formed"
+
+          # 只写文件，不回显内容 —— 口令经环境变量传递，不进日志。
+          printf '%s' "$KEYSTORE_BASE64"  | base64 --decode > bundle/release.p12
+          printf '%s' "$KEYSTORE_PASSWORD" > bundle/keystore-password.txt
+          printf '%s' "$KEY_ALIAS"         > bundle/key-alias.txt
+
+          echo "bundle contents:"
+          ls -l bundle/
+
+          # 自检：确认解码出来的 keystore 是真货，而不是一个空文件。
+          # 空 secret 经 base64 解码也会"成功"，只有 keytool 能识破。
+          # keytool 随 runner 的 JDK 一同提供，无需额外安装。
+          echo "verifying keystore readability..."
+          keytool -list -keystore bundle/release.p12 \
+                    -storetype PKCS12 \
+                    -storepass "$(cat bundle/keystore-password.txt)" \
+                    -alias "$(cat bundle/key-alias.txt)" \
+                    > keystore-info.txt 2>&1 || {
+                      echo "::error::keystore is unreadable (expected alias: $(cat bundle/key-alias.txt))"
+                      cat keystore-info.txt
+                      exit 1
+                    }
+          # 只把非敏感摘要写日志。条目名、有效期、算法可见，私钥内容不可见。
+          grep -E "Alias name|Entry type|Owner|Valid|Signature algorithm" keystore-info.txt \
+            | sed 's/^/  /' || true
+
+          # 打包。目录与文件名都要列出，才能保住 bundle 里的三个文件。
+          tar -czf bundle.tar.gz bundle keystore-info.txt
+
+          # AES-256 数据密钥加密归档，再用 RSA-2048 公钥包裹数据密钥。
+          # 显式固定 <SECRET_d827c530> 与 100000 次迭代：runner 上的
+          # OpenSSL 与本机可能是不同小版本，不显式指定时这些默认值会随
+          # 实现改动，固定住才能保证本地解得出。
+          openssl rand -base64 32 > aes-key.txt
+          openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -iter 100000 \
+            -in bundle.tar.gz -out out/bundle.enc -pass file:aes-key.txt
+          openssl pkeyutl -encrypt -pubin -inkey wrap-pub.pem \
+            -in aes-key.txt -out out/aes-key.enc
+
+          rm -f bundle/release.p12 bundle/keystore-password.txt bundle/key-alias.txt aes-key.txt
+          echo "encrypted artifacts (plaintext removed):"
+          ls -l out/
+
+      - name: Upload the encrypted bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key-encrypted
+          path: |
+            out/bundle.enc
+            out/aes-key.enc
+            keystore-info.txt
+          if-no-files-found: error
+          retention-days: 1
