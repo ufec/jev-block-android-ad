@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.CoroutineScope
@@ -13,9 +14,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
 import me.ethanxu.jevnoisegate.core.common.log.AppLog
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 
 /**
  * 设置读写。
@@ -36,19 +46,23 @@ import me.ethanxu.jevnoisegate.core.common.log.AppLog
  * 都会立刻看到 —— 这正是逐页各持一份 ViewModel 时最容易出错的地方。
  */
 interface SettingsRepository {
+    /** Defaults are provisional until the first load attempt finishes. */
+    val isReady: Boolean get() = true
     val preferences: StateFlow<AppPreferences>
 
     /**
-     * 阻塞至首次从磁盘加载完成。
+     * 挂起至首次加载完成或失败，不阻塞主线程。加载有五秒总时限。
      *
      * 存在的理由：内存 StateFlow 的初值是默认值，而真实配置要等一次磁盘读取。
      * 日志等级等启动配置必须先加载完成，避免使用默认值。
      */
-    fun awaitReady()
+    suspend fun awaitReady()
+    val persistenceError: StateFlow<String?>
 
     suspend fun setUiMode(value: String)
     suspend fun setColorMode(value: Int)
     suspend fun setKeyColor(value: Int)
+
 
     /** 关闭/开启对某个 App 的通知监听。 */
     suspend fun setAppMuted(packageName: String, muted: Boolean)
@@ -88,114 +102,196 @@ interface SettingsRepository {
 
 internal class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SettingsRepository {
+    override val isReady: Boolean get() = ready.isCompleted
 
     /** 界面看到的唯一真相源。进程内单例，因此全局一致。 */
     private val inMemory = MutableStateFlow(AppPreferences())
 
     override val preferences: StateFlow<AppPreferences> = inMemory.asStateFlow()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     /** 首次加载完成信号，供 [awaitReady] 使用。 */
-    private val ready = java.util.concurrent.CountDownLatch(1)
+    private val ready = CompletableDeferred<Unit>()
+    private val memoryLock = Any()
+    private val reloadLock = Mutex()
+    @Volatile private var loaded = false
+    private val error = MutableStateFlow<String?>(null)
+    override val persistenceError: StateFlow<String?> = error.asStateFlow()
+    private data class Write(val snapshot: AppPreferences, val completions: List<CompletableDeferred<Unit>>)
+    private var pendingSnapshot: AppPreferences? = null
+    private val pendingCompletions = mutableListOf<CompletableDeferred<Unit>>()
+    private var lastPersisted: AppPreferences? = null
+    private var writing = false
+    private val slots = Semaphore(64)
+    private val writes = Channel<Unit>(Channel.CONFLATED)
 
     init {
         // 启动时从磁盘载入一次。之后内存是权威，磁盘只是持久化副本。
         scope.launch {
-            // Migration removes secrets and connection settings left by older API builds.
-            val loaded = dataStore.edit { prefs ->
-                listOf("api_key", "base_url", "model", "proxy_type", "proxy_host",
-                    "proxy_username", "proxy_password", "proxy_verified_fingerprint")
-                    .forEach { prefs.remove(stringPreferencesKey(it)) }
-                prefs.remove(intPreferencesKey("proxy_port"))
-                prefs.remove(androidx.datastore.preferences.core.longPreferencesKey("timeout_ms"))
-            }.toAppPreferences()
-            inMemory.value = loaded
-            // 日志等级必须在任何业务代码产出日志之前生效，否则启动早期的日志会漏记。
-            AppLog.configure(loaded.logLevel)
-            ready.countDown()
+            try {
+                // 读与清各有自己的时限，合起来最坏 10 秒 —— 也就是就绪信号的最长等待。
+                // 卡住时必须放行：应用连"设置读不出来"都无法呈现比慢一点更糟。
+                val stored = withTimeoutOrNull(5_000L) { dataStore.data.first() }
+                    ?: throw java.io.IOException("Settings load timed out")
+                withTimeoutOrNull(5_000L) { purgeLegacyKeys(stored) }
+                    ?: throw java.io.IOException("Settings migration timed out")
+                inMemory.value = stored.toAppPreferences()
+                lastPersisted = inMemory.value
+                loaded = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error.value = "设置加载或迁移失败，请检查当前配置：${failure::class.java.simpleName}"
+            } finally {
+                // 日志等级必须在任何业务代码产出日志之前生效，否则启动早期的日志会漏记。
+                // 成功路径上这里读到的是真实配置；加载失败时只能用默认值，但仍然要放行 readiness，
+                // 否则整个应用连"设置读不出来"这件事都无法呈现。
+                AppLog.configure(inMemory.value.logLevel)
+                ready.complete(Unit)
+            }
+            for (ignored in writes) {
+                val write = synchronized(memoryLock) {
+                    pendingSnapshot?.let { snapshot ->
+                        Write(snapshot, pendingCompletions.toList()).also {
+                            writing = true
+                            pendingSnapshot = null
+                            pendingCompletions.clear()
+                        }
+                    }
+                } ?: continue
+                try {
+                    dataStore.edit { persistSnapshot(it, write.snapshot) }
+                    PerformanceMetrics.increment(PerformanceCounter.SETTINGS_WRITE)
+                    synchronized(memoryLock) { lastPersisted = write.snapshot }
+                    error.value = null
+                    write.completions.forEach { it.complete(Unit) }
+                } catch (cancelled: CancellationException) {
+                    write.completions.forEach { it.cancel(cancelled) }
+                    throw cancelled
+                } catch (failure: Exception) {
+                    error.value = "设置保存失败，重启后可能丢失改动：${failure::class.java.simpleName}"
+                    write.completions.forEach { it.completeExceptionally(failure) }
+                } finally {
+                    synchronized(memoryLock) { writing = false }
+                    repeat(write.completions.size) { slots.release() }
+                }
+            }
         }
     }
 
-    override fun awaitReady() {
+    override suspend fun awaitReady() {
         ready.await()
     }
 
-    override suspend fun setUiMode(value: String) = mutate({ it.copy(uiMode = value) }) {
-        it[Keys.UI_MODE] = value
+    override suspend fun setUiMode(value: String) = mutate { it.copy(uiMode = value) }
+    override suspend fun setColorMode(value: Int) = mutate { it.copy(colorMode = value) }
+    override suspend fun setKeyColor(value: Int) = mutate { it.copy(keyColor = value) }
+    override suspend fun setAppMuted(packageName: String, muted: Boolean) = mutate {
+        it.copy(mutedPackages = if (muted) it.mutedPackages + packageName else it.mutedPackages - packageName)
     }
-
-    override suspend fun setColorMode(value: Int) = mutate({ it.copy(colorMode = value) }) {
-        it[Keys.COLOR_MODE] = value
-    }
-
-    override suspend fun setKeyColor(value: Int) = mutate({ it.copy(keyColor = value) }) {
-        it[Keys.KEY_COLOR] = value
-    }
-
-    override suspend fun setAppMuted(packageName: String, muted: Boolean) {
-        val current = inMemory.value.mutedPackages
-        mutate({ it.copy(mutedPackages = if (muted) current + packageName else current - packageName) }) {
-            it[Keys.MUTED_PACKAGES] = if (muted) current + packageName else current - packageName
-        }
-    }
-
     override suspend fun setLogLevel(value: Int) {
         // 先让等级立即生效，再落盘 —— 否则用户在设置里调完等级，
         // 到落盘完成之前的日志仍然按旧等级过滤。
         AppLog.configure(value)
-        mutate({ it.copy(logLevel = value) }) { it[Keys.LOG_LEVEL] = value }
+        mutate { it.copy(logLevel = value) }
     }
 
-    override suspend fun setPreferAllowRules(value: List<String>) =
-        mutate({ it.copy(preferAllowRules = value) }) { it[Keys.PREFER_ALLOW] = value.joinToString("\n") }
+    override suspend fun setPreferAllowRules(value: List<String>) = mutate { it.copy(preferAllowRules = value.toList()) }
 
-    override suspend fun setPreferBlockRules(value: List<String>) =
-        mutate({ it.copy(preferBlockRules = value) }) { it[Keys.PREFER_BLOCK] = value.joinToString("\n") }
+    override suspend fun setPreferBlockRules(value: List<String>) = mutate { it.copy(preferBlockRules = value.toList()) }
 
-    override suspend fun setSmsSenderBlacklist(value: List<String>) =
-        mutate({ it.copy(smsSenderBlacklist = value) }) { it[Keys.SMS_BLACKLIST] = value.joinToString("\n") }
+    override suspend fun setSmsSenderBlacklist(value: List<String>) = mutate { it.copy(smsSenderBlacklist = value.toList()) }
 
-    override suspend fun setDeveloperMode(value: Boolean) =
-        mutate({ it.copy(developerMode = value) }) { it[Keys.DEVELOPER_MODE] = value }
-
+    override suspend fun setDeveloperMode(value: Boolean) = mutate { it.copy(developerMode = value) }
     override suspend fun setCategoryThreshold(name: String, value: Float) {
-        val next = inMemory.value.categoryThresholds + (name to value.coerceIn(0f, 1f))
-        mutate({ it.copy(categoryThresholds = next) }) {
-            it[Keys.CATEGORY_THRESHOLDS] = encodeOverrides(next)
-        }
+        require(value.isFinite()) { "判定门槛必须是有限数" }
+        mutate { it.copy(categoryThresholds = it.categoryThresholds + (name to value.coerceIn(0f, 1f))) }
+    }
+    override suspend fun setCategoryAction(name: String, value: String) = mutate {
+        it.copy(categoryActions = it.categoryActions + (name to value))
+    }
+    override suspend fun resetCategoryOverrides() = mutate {
+        it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap())
     }
 
-    override suspend fun setCategoryAction(name: String, value: String) {
-        val next = inMemory.value.categoryActions + (name to value)
-        mutate({ it.copy(categoryActions = next) }) {
-            it[Keys.CATEGORY_ACTIONS] = encodeOverrides(next)
+    /** Accepted snapshots coalesce; at most 64 accepted callers await persistence, even on slow storage. */
+    private suspend fun mutate(updateMemory: (AppPreferences) -> AppPreferences) {
+        ready.await()
+        ensureLoaded()
+        slots.acquire()
+        val done = CompletableDeferred<Unit>()
+        var accepted = false
+        try {
+            synchronized(memoryLock) {
+                val next = updateMemory(inMemory.value)
+                if (!writing && pendingSnapshot == null && next == lastPersisted && next == inMemory.value && error.value == null) return
+                inMemory.value = next
+                AppLog.configure(next.logLevel)
+                pendingSnapshot = next
+                pendingCompletions += done
+                accepted = true
+                check(writes.trySend(Unit).isSuccess)
+            }
+        } finally {
+            if (!accepted) slots.release()
         }
+        done.await()
     }
 
-    override suspend fun resetCategoryOverrides() {
-        mutate({ it.copy(categoryThresholds = emptyMap(), categoryActions = emptyMap()) }) {
-            // remove 而不是写空串：两者解析出来都是空 map，但 remove 让 DataStore 里
-            // 不再留下这两个键，文件状态与"从未改过"完全一致。
-            it.remove(Keys.CATEGORY_THRESHOLDS)
-            it.remove(Keys.CATEGORY_ACTIONS)
+    /** Never overwrite unread settings with the temporary defaults shown after a load failure. */
+    private suspend fun ensureLoaded() {
+        if (loaded) return
+        reloadLock.withLock {
+            if (loaded) return@withLock
+            try {
+                val recovered = withTimeoutOrNull(5_000L) { dataStore.data.first().toAppPreferences() }
+                    ?: throw java.io.IOException("Settings reload timed out")
+                synchronized(memoryLock) {
+                    inMemory.value = recovered
+                    lastPersisted = recovered
+                    AppLog.configure(recovered.logLevel)
+                    loaded = true
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error.value = "设置尚未读出，未保存改动以保护原配置：${failure::class.java.simpleName}"
+                throw failure
+            }
         }
     }
 
     /**
-     * 先更新内存（让界面立即反映），再异步落盘。
+     * 清掉旧版 API 构建留下的密钥与代理配置。
      *
-     * 顺序不可颠倒：先落盘就意味着界面要等磁盘。
-     * 落盘放在 `scope`（进程级）而不是调用方的 `viewModelScope`，
-     * 避免用户快速退出界面时写入被取消。
+     * 这些键在本版本完全不读：留着它们等于在用户的偏好文件里存一份
+     * 没人再用、也再没机会清理的凭据。没有这些键时直接返回 ——
+     * 新装与已迁移过的常见路径因此不必付出一次写事务。
      */
-    private inline fun mutate(
-        crossinline updateMemory: (AppPreferences) -> AppPreferences,
-        crossinline updateDisk: (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
-    ) {
-        inMemory.update(updateMemory)
-        scope.launch { dataStore.edit { updateDisk(it) } }
+    private suspend fun purgeLegacyKeys(stored: Preferences) {
+        if (!Keys.LEGACY_KEYS.any { it in stored }) return
+        dataStore.edit { prefs -> Keys.LEGACY_KEYS.forEach { prefs.remove(it) } }
+    }
+
+    /**
+     * 覆盖写有个前提：调用方（[mutate]）保证它先成功读过一次，因此这里的
+     * `prefs` 不是"默认值 + 这一个字段"的组合，而是完整的真实配置。
+     */
+    private fun persistSnapshot(values: androidx.datastore.preferences.core.MutablePreferences, prefs: AppPreferences) {
+        values[Keys.UI_MODE] = prefs.uiMode
+        values[Keys.COLOR_MODE] = prefs.colorMode
+        values[Keys.KEY_COLOR] = prefs.keyColor
+        values[Keys.MUTED_PACKAGES] = prefs.mutedPackages
+        values[Keys.LOG_LEVEL] = prefs.logLevel
+        values[Keys.PREFER_ALLOW] = prefs.preferAllowRules.joinToString("\n")
+        values[Keys.PREFER_BLOCK] = prefs.preferBlockRules.joinToString("\n")
+        values[Keys.SMS_BLACKLIST] = prefs.smsSenderBlacklist.joinToString("\n")
+        values[Keys.DEVELOPER_MODE] = prefs.developerMode
+        // 清空覆盖值时写空串而不是 remove：整份覆盖写无法"只删一个键"，
+        // 而空串解析出来就是空 map，语义与从未设置一致。
+        values[Keys.CATEGORY_THRESHOLDS] = encodeOverrides(prefs.categoryThresholds)
+        values[Keys.CATEGORY_ACTIONS] = encodeOverrides(prefs.categoryActions)
     }
 
     private object Keys {
@@ -215,6 +311,15 @@ internal class DataStoreSettingsRepository(
         // 因此用"类别名=值"的换行分隔文本 —— 与上面的规则字段同一套惯例。
         val CATEGORY_THRESHOLDS = stringPreferencesKey("category_thresholds")
         val CATEGORY_ACTIONS = stringPreferencesKey("category_actions")
+
+        /** 旧版 API 构建留下的键，本版本一律清除且不再读取。 */
+        val LEGACY_KEYS = listOf<Preferences.Key<*>>(
+            stringPreferencesKey("api_key"), stringPreferencesKey("base_url"),
+            stringPreferencesKey("model"), longPreferencesKey("timeout_ms"),
+            stringPreferencesKey("proxy_type"), stringPreferencesKey("proxy_host"),
+            intPreferencesKey("proxy_port"), stringPreferencesKey("proxy_username"),
+            stringPreferencesKey("proxy_password"), stringPreferencesKey("proxy_verified_fingerprint"),
+        )
     }
 }
 
@@ -234,7 +339,7 @@ private fun Preferences.toAppPreferences(): AppPreferences {
         // （NaN 参与的比较恒为 false，会让该类别永远走不到"执行动作"那一步），
         // 不如退回出厂默认。
         categoryThresholds = parseOverrides(this[stringPreferencesKey("category_thresholds")])
-            .mapNotNull { (name, raw) -> raw.toFloatOrNull()?.let { name to it.coerceIn(0f, 1f) } }
+            .mapNotNull { (name, raw) -> raw.toFloatOrNull()?.takeIf { it.isFinite() }?.let { name to it.coerceIn(0f, 1f) } }
             .toMap(),
         categoryActions = parseOverrides(this[stringPreferencesKey("category_actions")]),
     )

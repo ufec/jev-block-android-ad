@@ -1,0 +1,309 @@
+{
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "scope": "Desktop SQLite in memory, warm synthetic 1 KiB bodies; no Room, Binder, disk, network or device measurements.",
+  "samples": [
+    {
+      "rows": 1000,
+      "candidate_indexes": false,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "approx_vm_steps": 17000,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.8602
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 3800,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.1094
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "approx_vm_steps": 4000,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.6761
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 3200,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.1309
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 14400,
+          "result_rows": 10,
+          "median_ms_20_runs": 0.5454
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY"
+          ],
+          "approx_vm_steps": 14000,
+          "result_rows": 2,
+          "median_ms_20_runs": 0.4104
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 4000,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.136
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "approx_vm_steps": 1100,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0495
+        }
+      }
+    },
+    {
+      "rows": 1000,
+      "candidate_indexes": true,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "approx_vm_steps": 17000,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.8587
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SEARCH observed_event USING INDEX probe_sms (source=? AND decidedAtMs>?)"
+          ],
+          "approx_vm_steps": 200,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.0252
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SEARCH observed_event USING INDEX probe_quarantine (action=?)"
+          ],
+          "approx_vm_steps": 2700,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.6104
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX probe_quarantine (action=?)"
+          ],
+          "approx_vm_steps": 800,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0187
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX probe_channels",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 8500,
+          "result_rows": 10,
+          "median_ms_20_runs": 0.198
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX probe_quarantine (action>?)"
+          ],
+          "approx_vm_steps": 7100,
+          "result_rows": 2,
+          "median_ms_20_runs": 0.1212
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 4000,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.1354
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "approx_vm_steps": 1200,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0484
+        }
+      }
+    },
+    {
+      "rows": 10000,
+      "candidate_indexes": false,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "approx_vm_steps": 170000,
+          "result_rows": 0,
+          "median_ms_20_runs": 13.5122
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 37100,
+          "result_rows": 3,
+          "median_ms_20_runs": 1.267
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "approx_vm_steps": 4000,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.734
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 32500,
+          "result_rows": 1,
+          "median_ms_20_runs": 2.2096
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 140400,
+          "result_rows": 10,
+          "median_ms_20_runs": 6.487
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY"
+          ],
+          "approx_vm_steps": 140000,
+          "result_rows": 2,
+          "median_ms_20_runs": 5.3301
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 40000,
+          "result_rows": 1,
+          "median_ms_20_runs": 2.1088
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "approx_vm_steps": 11500,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.6623
+        }
+      }
+    },
+    {
+      "rows": 10000,
+      "candidate_indexes": true,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "approx_vm_steps": 170000,
+          "result_rows": 0,
+          "median_ms_20_runs": 14.1246
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SEARCH observed_event USING INDEX probe_sms (source=? AND decidedAtMs>?)"
+          ],
+          "approx_vm_steps": 200,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.0261
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SEARCH observed_event USING INDEX probe_quarantine (action=?)"
+          ],
+          "approx_vm_steps": 2700,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.6253
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX probe_quarantine (action=?)"
+          ],
+          "approx_vm_steps": 7500,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.1633
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event USING COVERING INDEX probe_channels",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "approx_vm_steps": 80500,
+          "result_rows": 10,
+          "median_ms_20_runs": 1.6245
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SEARCH observed_event USING COVERING INDEX probe_quarantine (action>?)"
+          ],
+          "approx_vm_steps": 70100,
+          "result_rows": 2,
+          "median_ms_20_runs": 1.1724
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "approx_vm_steps": 40000,
+          "result_rows": 1,
+          "median_ms_20_runs": 1.7827
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "approx_vm_steps": 11500,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.5767
+        }
+      }
+    }
+  ]
+}

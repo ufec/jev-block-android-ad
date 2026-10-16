@@ -34,6 +34,7 @@ private const val TAG = "NotifDedup"
 internal class RecentPostCache(
     private val maxSize: Int = 256,
     private val windowMs: Long = DEFAULT_WINDOW_MS,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
 
     /** entry → 最近一次见到它的时刻。 */
@@ -51,9 +52,9 @@ internal class RecentPostCache(
             // 若可读时也并入时刻，每次投递都成了新事件，等于完全不做去重。
             "${title.orEmpty()}|$postTime"
         } else {
-            body
+            "${title.orEmpty().length}:${title.orEmpty()}${body.length}:$body"
         }
-        val entry = "$notificationKey|${discriminator.hashCode()}"
+        val entry = "$notificationKey|$discriminator"
 
         // 窗口必须用**我们的观察时钟**，而不是通知自带的 postTime。
         //
@@ -62,7 +63,7 @@ internal class RecentPostCache(
         // 滑动窗口根本没机会推进。表现就是"无论发多少条都只记第一条"。
         //
         // 窗口要回答的问题是"我最近刚见过它吗"，这显然是关于我们自己的观察时间。
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
 
         val lastSeen = seen[entry]
         if (lastSeen != null && now - lastSeen < windowMs) {
@@ -87,6 +88,12 @@ internal class RecentPostCache(
         seen[entry] = now
         return true
     }
+
+    fun forget(notificationKey: String) {
+        seen.keys.removeAll { it.startsWith("$notificationKey|") }
+    }
+
+    fun clear() { seen.clear() }
 
     private companion object {
         /**

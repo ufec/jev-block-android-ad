@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import me.ethanxu.jevnoisegate.core.common.log.AppLog
+import me.ethanxu.jevnoisegate.core.common.log.LogCategory
 import me.ethanxu.jevnoisegate.core.data.settings.AppPreferences
 import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
 
@@ -16,6 +19,8 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
     val preferences: StateFlow<AppPreferences> = repository.preferences
     val localModelStatus = localModel.status
+    val persistenceError: StateFlow<String?> = repository.persistenceError
+    suspend fun awaitReady() = repository.awaitReady()
 
     fun setColorMode(value: Int) = launchSetting { repository.setColorMode(value) }
     fun setKeyColor(value: Int) = launchSetting { repository.setKeyColor(value) }
@@ -30,6 +35,14 @@ class SettingsViewModel @Inject constructor(
     fun resetCategoryOverrides() = launchSetting { repository.resetCategoryOverrides() }
 
     private inline fun launchSetting(crossinline block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLog.w(LogCategory.SYSTEM, "Settings", error) { "设置未保存" }
+            }
+        }
     }
 }

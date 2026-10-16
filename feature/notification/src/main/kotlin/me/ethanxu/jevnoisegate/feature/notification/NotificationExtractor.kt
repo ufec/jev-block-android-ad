@@ -1,6 +1,7 @@
 package me.ethanxu.jevnoisegate.feature.notification
 
 import android.app.Notification
+import androidx.core.app.NotificationCompat
 import android.os.Build
 import android.service.notification.StatusBarNotification
 import me.ethanxu.jevnoisegate.core.fingerprint.Fingerprint
@@ -20,6 +21,8 @@ data class ExtractedEvent(
     val channelLabel: String?,
 )
 
+data class NotificationContent(val title: String?, val body: String)
+
 /**
  * `StatusBarNotification` → [ExtractedEvent]。
  *
@@ -27,6 +30,7 @@ data class ExtractedEvent(
  * `Notification` 验证抽取逻辑 —— 通知正文的优先级规则是这里最容易出错的地方。
  */
 object NotificationExtractor {
+    fun contentOf(notification: Notification): NotificationContent = NotificationContent(titleOf(notification), bodyOf(notification))
 
     /**
      * 抽取正文，按下面的优先级拼接。
@@ -44,6 +48,8 @@ object NotificationExtractor {
             if (text.isNotEmpty() && text !in parts) parts += text
         }
 
+        NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
+            ?.messages?.forEach { add(it.text) }
         add(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
         add(extras.getCharSequence(Notification.EXTRA_TEXT))
 
@@ -88,9 +94,9 @@ object NotificationExtractor {
         channelLabel: String?,
         id: String,
         nowMs: Long,
+        content: NotificationContent = contentOf(sbn.notification),
     ): ExtractedEvent {
         val notification = sbn.notification
-        val body = bodyOf(notification)
 
         val event = MessageEvent(
             id = id,
@@ -99,8 +105,8 @@ object NotificationExtractor {
             packageName = sbn.packageName,
             channelId = notification.channelId,
             senderKey = sbn.groupKey ?: sbn.key,
-            title = titleOf(notification),
-            body = body,
+            title = content.title,
+            body = content.body,
         )
 
         return ExtractedEvent(

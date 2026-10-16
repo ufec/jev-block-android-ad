@@ -8,11 +8,11 @@
       代价是无法删除或拦截短信本体，只能取消它产生的通知；
       收益是不必重做一个完整的短信应用，也不必处理 MMS / RCS 的兼容包袱。
 
-      READ_SMS 不是硬依赖 —— 拿不到时短信通知仍会被通知采集端捕获，
+      RECEIVE_SMS 不是硬依赖 —— 拿不到时短信通知仍会被通知采集端捕获，
       只是正文要靠解析通知里的文本，覆盖率下降但功能不塌。
     -->
-    <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application>
 

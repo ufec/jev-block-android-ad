@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.os.UserHandle
 import android.service.notification.NotificationListenerService
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * 解析 App 显示名与通知渠道显示名。
@@ -15,20 +16,22 @@ import android.util.Log
  * 因此按包缓存 `channelId → name` 映射，一个包一次 binder 调用。
  * 普通 `NotificationManager` 只能读到本 App 自己的渠道。
  */
-internal class LabelResolver(private val service: NotificationListenerService) {
+internal class LabelResolver(private val service: NotificationListenerService, scope: CoroutineScope) {
 
-    private val appLabelCache = HashMap<String, String?>()
+    private val appLabelCache = AsyncLookupCache<String, String>(scope, load = ::lookupAppLabel)
 
     /** 兜底用的全量映射：直接查单个包失败时（包可见性受限）从这里找。 */
-    private val installedLabelCache: Map<String, String> by lazy { loadInstalledLabels() }
-
-    private val channelNamesCache = HashMap<String, Map<String, String>>()
-
-    fun appLabel(packageName: String): String? = appLabelCache.getOrPut(packageName) {
-        lookupAppLabel(packageName)
+    private val installedLabelCache = AsyncLookupCache<Unit, Map<String, String>>(scope) {
+        loadInstalledLabels().takeIf { it.isNotEmpty() }
     }
 
-    private fun lookupAppLabel(packageName: String): String? {
+    private val channelNamesCache = AsyncLookupCache<Pair<String, Int>, Map<String, String>>(scope) { (pkg, uid) ->
+        loadChannelNames(pkg, uid).takeIf { it.isNotEmpty() }
+    }
+
+    suspend fun appLabel(packageName: String): String? = appLabelCache.get(packageName)
+
+    private suspend fun lookupAppLabel(packageName: String): String? {
         val pm = service.packageManager
 
         runCatching {
@@ -44,9 +47,10 @@ internal class LabelResolver(private val service: NotificationListenerService) {
         // 兜底：从全量列表里找。Android 11+ 的包可见性限制会让 getApplicationInfo
         // 对"未交互过"的第三方应用抛 NameNotFoundException，而 getInstalledApplications
         // 在 QUERY_ALL_PACKAGES 生效时仍能返回完整列表。
-        installedLabelCache[packageName]?.let { return it }
+        val installed = installedLabelCache.get(Unit).orEmpty()
+        installed[packageName]?.let { return it }
 
-        if (installedLabelCache.isEmpty()) {
+        if (installed.isEmpty()) {
             Log.d(TAG, "全量应用列表为空 —— QUERY_ALL_PACKAGES 可能未生效")
         }
         return null
@@ -63,10 +67,9 @@ internal class LabelResolver(private val service: NotificationListenerService) {
         emptyMap()
     }
 
-    fun channelLabel(packageName: String, uid: Int, channelId: String?): String? {
+    suspend fun channelLabel(packageName: String, uid: Int, channelId: String?): String? {
         if (channelId == null) return null
-        val names = channelNamesCache.getOrPut(packageName) { loadChannelNames(packageName, uid) }
-        return names[channelId]
+        return channelNamesCache.get(packageName to uid)?.get(channelId)
     }
 
     /**
@@ -76,10 +79,10 @@ internal class LabelResolver(private val service: NotificationListenerService) {
      * 若数量只有几十（仅系统包），说明 ROM 在 AOSP 的 QUERY_ALL_PACKAGES 之上
      * 又加了一层"获取应用列表"开关，解析第三方 App 名就必然失败。
      */
-    fun visibleAppCount(): Int = installedLabelCache.size
+    suspend fun visibleAppCount(): Int = installedLabelCache.get(Unit).orEmpty().size
 
     /** 诊断用：可见列表里的第三方包样本，用于判断可见性的性质。 */
-    fun visibleAppSamples(limit: Int): List<String> = installedLabelCache.keys
+    suspend fun visibleAppSamples(limit: Int): List<String> = installedLabelCache.get(Unit).orEmpty().keys
         .filterNot { it.startsWith("android") || it.startsWith("com.android") }
         .take(limit)
 

@@ -6,6 +6,7 @@ data class AppPreferences(
     val colorMode: Int = DEFAULT_COLOR_MODE,
     val keyColor: Int = DEFAULT_KEY_COLOR,
     val mutedPackages: Set<String> = emptySet(),
+
     val preferAllowRules: List<String> = emptyList(),
     val preferBlockRules: List<String> = emptyList(),
     val categoryThresholds: Map<String, Float> = emptyMap(),
@@ -21,3 +22,4 @@ data class AppPreferences(
         const val DEFAULT_LOG_LEVEL = 2
     }
 }
+

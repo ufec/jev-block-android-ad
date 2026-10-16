@@ -5,12 +5,11 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 
 /** 日志等级。数值越大越严重。 */
 enum class LogLevel(val value: Int, val label: String) {
@@ -84,9 +83,6 @@ object AppLog {
     /** 单个日志文件的上限。两代合计即磁盘占用上限。 */
     private const val MAX_FILE_BYTES = 2L * 1024 * 1024
 
-    private const val FLUSH_INTERVAL_MS = 2_000L
-    private const val FLUSH_BATCH_THRESHOLD = 64
-
     private const val LOG_DIR = "logs"
     private const val LOG_FILE = "runtime.log"
     private const val ROTATED_SUFFIX = ".1"
@@ -99,12 +95,12 @@ object AppLog {
     private val lock = Any()
     private var seq: Long = 0
 
-    /** 待落盘的文本行。热路径只往这里塞字符串。 */
-    private val pending = ArrayDeque<String>()
-
     private var logFile: File? = null
     private var rotatedFile: File? = null
-    private var flusher: CoroutineScope? = null
+    private var writer: BatchedLogWriter? = null
+    private var snapshotDirty = false
+    private var historyCleared = false
+    @Volatile private var diskBytes = 0L
 
     private val _entries = MutableStateFlow<List<LogEntry>>(emptyList())
 
@@ -119,21 +115,32 @@ object AppLog {
      * 重复调用无副作用。
      */
     fun init(context: Context) {
-        if (flusher != null) return
-
-        val dir = File(context.filesDir, LOG_DIR).apply { mkdirs() }
-        logFile = File(dir, LOG_FILE)
-        rotatedFile = File(dir, LOG_FILE + ROTATED_SUFFIX)
-
-        loadHistory()
-
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        flusher = scope
-        scope.launch {
-            while (isActive) {
-                delay(FLUSH_INTERVAL_MS)
-                flush()
-            }
+        synchronized(lock) {
+            if (writer != null) return
+            val dir = File(context.filesDir, LOG_DIR)
+            logFile = File(dir, LOG_FILE)
+            rotatedFile = File(dir, LOG_FILE + ROTATED_SUFFIX)
+            writer = BatchedLogWriter(
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                initialize = {
+                    dir.mkdirs()
+                    loadHistory()
+                    updateDiskUsage()
+                },
+                write = ::writeBatch,
+                clearFiles = {
+                    runCatching { logFile?.delete(); rotatedFile?.delete() }
+                    updateDiskUsage()
+                },
+                publish = {
+                    synchronized(lock) {
+                        if (snapshotDirty) {
+                            _entries.value = buffer.toList()
+                            snapshotDirty = false
+                        }
+                    }
+                },
+            )
         }
     }
 
@@ -162,18 +169,19 @@ object AppLog {
     fun clear() {
         synchronized(lock) {
             buffer.clear()
-            pending.clear()
             _entries.value = emptyList()
-        }
-        runCatching {
-            logFile?.takeIf { it.exists() }?.delete()
-            rotatedFile?.takeIf { it.exists() }?.delete()
+            snapshotDirty = false
+            historyCleared = true
+            writer?.clear()
         }
     }
 
     /** 磁盘上当前占用的字节数，供界面显示。 */
-    fun diskUsageBytes(): Long =
-        (logFile?.length() ?: 0L) + (rotatedFile?.length() ?: 0L)
+    fun diskUsageBytes(): Long = diskBytes
+
+    private fun updateDiskUsage() {
+        diskBytes = (logFile?.length() ?: 0L) + (rotatedFile?.length() ?: 0L)
+    }
 
     private fun log(
         level: LogLevel,
@@ -209,26 +217,9 @@ object AppLog {
                 ),
             )
             while (buffer.size > MAX_ENTRIES) buffer.removeLast()
-            _entries.value = buffer.toList()
-
-            // 只入队，不落盘 —— 磁盘 IO 留给后台协程。
-            pending.addLast(encode(now, level, category, tag, stored))
-
-            // 积压太多时立即刷一次，避免长时间不写导致进程被杀时丢得太多。
-            if (pending.size >= FLUSH_BATCH_THRESHOLD) {
-                val batch = pending.toList()
-                pending.clear()
-                writeBatch(batch)
-            }
+            snapshotDirty = true
+            writer?.append(encode(now, level, category, tag, stored))
         }
-    }
-
-    private fun flush() {
-        val batch = synchronized(lock) {
-            if (pending.isEmpty()) return
-            pending.toList().also { pending.clear() }
-        }
-        writeBatch(batch)
     }
 
     private fun writeBatch(batch: List<String>) {
@@ -237,7 +228,9 @@ object AppLog {
             rotateIfNeeded(file)
             // 一次 appendText 写入整批：把 N 次小写入合并成 1 次系统调用。
             file.appendText(batch.joinToString(separator = "\n", postfix = "\n"))
+            PerformanceMetrics.increment(PerformanceCounter.LOG_WRITE)
         }
+        updateDiskUsage()
     }
 
     /**
@@ -265,14 +258,15 @@ object AppLog {
         if (restored.isEmpty()) return
 
         synchronized(lock) {
+            if (historyCleared) return
             // 恢复的条目必须**重新编号**：磁盘上不存 seq，decode 出来的全是 0，
             // 而界面用 seq 做 LazyColumn 的 key —— 不重编号会让所有键重复，
             // 直接抛 "Key was already used" 崩溃。
-            restored.forEach { entry ->
+            restored.take((MAX_ENTRIES - buffer.size).coerceAtLeast(0)).forEach { entry ->
                 seq += 1
                 buffer.addLast(entry.copy(seq = seq))
             }
-            _entries.value = buffer.toList()
+            snapshotDirty = true
         }
     }
 

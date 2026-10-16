@@ -8,6 +8,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class DecisionMapperTest {
+    @Test
+    fun `invalid threshold fails open even when model confidence is high`() {
+        val input = Fixtures.input(categories = Fixtures.categories().map { it.copy(minConfidence = Float.NaN) })
+        assertEquals(Action.ALLOW, DecisionMapper.map(input, BackendOutcome.Decided("广告", 1f)).action)
+    }
 
     private fun map(
         outcome: BackendOutcome,

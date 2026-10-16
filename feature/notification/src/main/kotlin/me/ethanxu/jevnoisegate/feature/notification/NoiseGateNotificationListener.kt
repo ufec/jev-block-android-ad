@@ -1,181 +1,287 @@
 package me.ethanxu.jevnoisegate.feature.notification
 
+import android.app.Notification
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.NotificationCompat
+import android.os.Handler
+import android.os.Looper
+import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
-import android.app.Notification
-import android.provider.Telephony
-import me.ethanxu.jevnoisegate.core.common.sms.SmsNotificationSuppressor
-import me.ethanxu.jevnoisegate.core.common.log.AppLog
-import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
-import me.ethanxu.jevnoisegate.core.common.log.LogCategory
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import me.ethanxu.jevnoisegate.core.common.log.AppLog
+import me.ethanxu.jevnoisegate.core.common.log.LogCategory
+import me.ethanxu.jevnoisegate.core.common.sms.SmsNotificationSuppressor
+import me.ethanxu.jevnoisegate.core.common.sms.PendingSmsSuppression
+import me.ethanxu.jevnoisegate.core.common.AndroidMonotonicClock
+import me.ethanxu.jevnoisegate.core.common.DecisionTrace
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
 import me.ethanxu.jevnoisegate.core.data.ObservedEventDao
+import me.ethanxu.jevnoisegate.core.data.EventRetention
 import me.ethanxu.jevnoisegate.core.data.toEntity
+import me.ethanxu.jevnoisegate.core.data.settings.SettingsRepository
 import me.ethanxu.jevnoisegate.core.decision.EventLabels
-import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.dispatch.DecisionDispatcher
+import me.ethanxu.jevnoisegate.core.model.Action
 
-/**
- * 通知监听服务 —— 采集 + 判断 + 执行。
- *
- * 本服务的可用性**完全取决于用户在「设置 → 通知 → 通知使用权」里手动授权**。
- * 这是特殊权限，弹不出运行时对话框，也无法用代码申请 —— 未授权时系统根本不会绑定本服务，
- * `onCreate` 都不会被调用。
- *
- * 关于时机的诚实说明：`onNotificationPosted` 是**投递之后**的回调，
- * 因此"取消通知"只能擦掉通知栏的痕迹，无法阻止已经发生的声音与震动。
- * 这不是本实现的缺陷，而是 Android 的能力边界。真正的降噪手段是渠道级引导
- * （识别出稳定噪音源后引导用户关闭该渠道），那是后续工作。
- */
 @AndroidEntryPoint
 class NoiseGateNotificationListener : NotificationListenerService() {
+    @Inject lateinit var dao: ObservedEventDao
+    @Inject lateinit var dispatcher: DecisionDispatcher
+    @Inject lateinit var settings: SettingsRepository
+    @Inject lateinit var retention: EventRetention
 
-    @Inject
-    lateinit var dao: ObservedEventDao
-
-    @Inject
-    lateinit var dispatcher: DecisionDispatcher
-
-    @Inject
-    lateinit var settings: SettingsRepository
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var labels: LabelResolver
     private val recentPosts = RecentPostCache()
+    private val generations = NotificationGenerations()
+    private val jobs = mutableMapOf<String, Job>()
+    private val packages = mutableMapOf<String, String>()
+    private var connected = false
+    private var connectionVersion = 0L
+    private var bootCount: Int? = null
+    private val retryScheduled = AtomicBoolean(false)
+    private val retrySms = Runnable {
+        retryScheduled.set(false)
+        SmsNotificationSuppressor.retryPending()
+    }
+    private val cancelledBySms = mutableSetOf<String>()
 
     override fun onCreate() {
         super.onCreate()
-        labels = LabelResolver(this)
+        labels = LabelResolver(this, scope)
+        bootCount = AndroidMonotonicClock.bootCount(this)
+        // 降噪开关与模型就绪状态跨进程共享：关掉或模型未就绪时一律不采集、不撤销。
+        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
         AppLog.i(LogCategory.NOTIFICATION, TAG) { "通知监听服务已创建" }
         logPackageVisibility()
-    }
+        scope.launch {
+            settings.awaitReady()
+            settings.preferences.collect { prefs ->
+                packages.filterValues { it in prefs.mutedPackages }.keys.toList().forEach { key ->
+                    jobs.remove(key)?.cancel()
+                    generations.remove(key)
+                    recentPosts.forget(key)
+                    packages.remove(key)
+                }
 
-    override fun onDestroy() {
-        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
-        SmsNotificationSuppressor.detach()
-        AppLog.i(LogCategory.SYSTEM, TAG) { "通知监听服务已销毁" }
-        scope.cancel()
-        super.onDestroy()
+            }
+        }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        connected = true
         me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(true)
-        AppLog.i(LogCategory.NOTIFICATION, TAG) { "通知使用权已授予，开始采集与判断" }
-        // 短信侧判断完会回调这里来撤销对应的短信通知。
-        SmsNotificationSuppressor.attach(::cancelSmsNotification)
-    }
-
-    /**
-     * 按正文匹配并撤销默认短信应用的通知。
-     *
-     * **匹配用正文而不是发件人**：短信通知的标题在发件人是已保存联系人时显示的是
-     * 联系人名而非号码，用号码匹配会全部失配。正文则是原样带出的。
-     *
-     * 通知里的正文可能被系统截断，所以做双向包含判断而不是相等。
-     */
-    private fun cancelSmsNotification(sender: String?, body: String) {
-        if (body.isBlank()) return
-        val smsPackage = Telephony.Sms.getDefaultSmsPackage(this) ?: return
-
-        val target = activeNotifications.firstOrNull { sbn ->
-            if (sbn.packageName != smsPackage) return@firstOrNull false
-            val shown = sbn.notification.extras
-                .getCharSequence(Notification.EXTRA_TEXT)
-                ?.toString()
-                ?.takeIf { it.isNotBlank() }
-                ?: return@firstOrNull false
-            shown.length >= MIN_MATCH_LENGTH &&
-                (body.contains(shown) || shown.contains(body))
+        val version = ++connectionVersion
+        SmsNotificationSuppressor.attachBatch { pending ->
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                cancelSmsNotifications(pending)
+            } else {
+                if (retryScheduled.compareAndSet(false, true)) mainHandler.post(retrySms)
+                emptySet()
+            }
         }
-
-        if (target != null) {
-            cancelNotification(target.key)
-        } else {
-            // 找不到不算错误：短信 App 可能还没弹通知，或用户关了它的通知。
-            AppLog.d(LogCategory.SMS, TAG) { "未找到可撤销的短信通知（正文=${body.take(8)}…）" }
+        scope.launch {
+            try {
+                settings.awaitReady()
+                val saved = dao.recentSuppressedSms(System.currentTimeMillis() - 60_000L)
+                if (connected && connectionVersion == version) {
+                    SmsNotificationSuppressor.restore(saved.map {
+                        PendingSmsSuppression(it.senderKey, it.body, it.decidedAtMs + 60_000L)
+                    })
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                AppLog.w(LogCategory.SMS, TAG, failure) { "恢复短信待撤销队列失败" }
+            }
         }
     }
 
     override fun onListenerDisconnected() {
+        connected = false
         me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
+        connectionVersion++
+        mainHandler.removeCallbacks(retrySms)
+        retryScheduled.set(false)
         SmsNotificationSuppressor.detach()
-        AppLog.w(LogCategory.NOTIFICATION, TAG) { "通知使用权已断开" }
+        // Cancellation can run a task's finally block immediately on this thread.
+        // Detach the map and invalidate versions before touching any Job.
+        val pendingJobs = jobs.values.toList()
+        jobs.clear()
+        packages.clear()
+        generations.clear()
+        recentPosts.clear()
+        cancelledBySms.clear()
+        pendingJobs.forEach { it.cancel() }
         super.onListenerDisconnected()
     }
 
+    override fun onDestroy() {
+        connected = false
+        me.ethanxu.jevnoisegate.core.common.ServiceState.listenerConnected(false)
+        AppLog.i(LogCategory.SYSTEM, TAG) { "通知监听服务已销毁" }
+        SmsNotificationSuppressor.detach()
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private fun cancelSmsNotifications(pending: List<PendingSmsSuppression>): Set<PendingSmsSuppression> {
+        if (!connected || !me.ethanxu.jevnoisegate.core.common.ServiceState.running ||
+            pending.isEmpty()) return emptySet()
+        val smsPackage = Telephony.Sms.getDefaultSmsPackage(this) ?: return emptySet()
+        if (smsPackage in settings.preferences.value.mutedPackages) return emptySet()
+        return runCatching { matchSmsBatch(pending, load = {
+            PerformanceMetrics.increment(PerformanceCounter.SMS_SNAPSHOT)
+            activeNotifications.orEmpty().filter { it.packageName == smsPackage }.map { sbn ->
+            smsCandidate(sbn)
+            }
+        }, cancel = { key ->
+            runCatching {
+                cancelledBySms += key
+                jobs.remove(key)?.cancel()
+                packages.remove(key)
+                generations.remove(key)
+                cancelNotification(key)
+                true
+            }.getOrDefault(false)
+        }) }.getOrDefault(emptySet())
+    }
+
+    private fun smsCandidate(sbn: StatusBarNotification): SmsNotificationCandidate {
+            val note = sbn.notification
+            val messages = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(note)?.messages
+            val grouped = (note.flags and Notification.FLAG_GROUP_SUMMARY) != 0 ||
+                (messages?.size ?: 0) > 1 || (note.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.size ?: 0) > 1
+            val shown = messages?.singleOrNull()?.text?.toString()
+                ?: note.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                ?: note.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+            return SmsNotificationCandidate(sbn.key, shown,
+                note.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString(), grouped)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        if (!me.ethanxu.jevnoisegate.core.common.ServiceState.running) return
         val notification = sbn ?: return
-
-        // 排除自己的通知：回收站提醒之类的自产通知只会污染统计。
-        // 开发者模式把自家通知也当普通通知处理，自测通知因此能走完整链路。
-        val allowOwnPackage = settings.preferences.value.developerMode
-        if (!NotificationExtractor.isRecordable(notification, packageName, allowOwnPackage)) return
-
-        // 同一通知正文未变的重投直接丢弃，否则音乐播放器的进度更新能把接口打爆。
-        // 正文取不到时（自定义布局）改由"标题 + 投递时刻"区分，详见 RecentPostCache。
-        val body = NotificationExtractor.bodyForDedup(notification)
-        val dedupTitle = NotificationExtractor.titleForDedup(notification)
-        if (!recentPosts.markSeen(notification.key, body, dedupTitle, notification.postTime)) return
-
-        val appLabel = labels.appLabel(notification.packageName)
-        val channelLabel = labels.channelLabel(
-            packageName = notification.packageName,
-            uid = notification.uid,
-            channelId = notification.notification.channelId,
-        )
-
-        val extracted = NotificationExtractor.extract(
-            sbn = notification,
-            appLabel = appLabel,
-            channelLabel = channelLabel,
-            id = "${notification.key}#${notification.postTime}",
-            nowMs = System.currentTimeMillis(),
-        )
-
-        // onNotificationPosted 在主线程上，系统对它有超时预算 —— 立即返回，剩下的丢到 IO。
-        val notificationKey = notification.key
-        scope.launch {
+        if (!connected || !me.ethanxu.jevnoisegate.core.common.ServiceState.running) return
+        val ingressMs = AndroidMonotonicClock.nowMillis()
+        val trace = DecisionTrace(clock = AndroidMonotonicClock, startedMs = ingressMs)
+        if (settings.isReady) {
+            val prefs = settings.preferences.value
+            if (!NotificationPolicy.shouldProcess(notification.packageName, packageName,
+                    prefs.developerMode, prefs.mutedPackages)) return
+        }
+        val key = notification.key
+        val content = runCatching {
+            NotificationExtractor.contentOf(notification.notification)
+        }.getOrElse { return }
+        // Android may update progress/extras without changing the text being classified.
+        // Preserve the pending decision so repeated updates cannot starve it.
+        if (jobs[key]?.isActive == true && generations.matchesPending(key, content.title, content.body)) return
+        val generation = generations.begin(key, content.title, content.body)
+        jobs.remove(key)?.cancel()
+        if (jobs.size >= 64) {
+            generations.remove(key)
+            AppLog.w(LogCategory.NOTIFICATION, TAG) { "通知处理繁忙，本条放行" }
+            PerformanceMetrics.increment(PerformanceCounter.OVERLOAD)
+            return
+        }
+        // Assign the generation before any suspension so a late database read cannot
+        // make an older post newer than a notification already delivered by Android.
+        packages[key] = notification.packageName
+        val job = scope.launch {
             try {
-                dao.insert(
-                    extracted.event.toEntity(
-                        appLabel = appLabel,
-                        channelLabel = channelLabel,
-                    ),
-                )
-
-                val decision = dispatcher.dispatch(
-                    event = extracted.event,
-                    labels = EventLabels(
-                        appName = appLabel,
-                        channelName = channelLabel,
-                        senderIsContact = false,
-                    ),
-                )
-
-                AppLog.i(LogCategory.DECISION, TAG) {
-                    "判断完成 action=${decision.action} by=${decision.decidedBy} " +
-                        "cat=${decision.category} conf=${decision.confidence} " +
-                        "latency=${decision.latencyMillis}ms fail=${decision.failureReason}"
+                settings.awaitReady()
+                handlePosted(notification, generation, content, trace, ingressMs)
+            } catch (cancelled: CancellationException) {
+                PerformanceMetrics.increment(PerformanceCounter.CANCELLED)
+                throw cancelled
+            } catch (failure: Exception) {
+                AppLog.w(LogCategory.NOTIFICATION, TAG, failure) { "处理通知失败，本条放行" }
+            } finally {
+                if (generations.isCurrent(key, generation)) {
+                    jobs.remove(key)
+                    packages.remove(key)
+                    generations.remove(key)
                 }
-
-                // 只有明确判定为噪音才动手；fail-open 的路径一律是 ALLOW，不会走到这里。
-                if (decision.action != Action.ALLOW && me.ethanxu.jevnoisegate.core.common.ServiceState.running) {
-                    cancelNotification(notificationKey)
-                }
-            } catch (error: Throwable) {
-                AppLog.w(LogCategory.NOTIFICATION, TAG, error) { "处理通知失败: ${error.message}" }
             }
         }
+        if (job.isActive) jobs[key] = job
+    }
+
+    private suspend fun handlePosted(notification: StatusBarNotification, generation: Long, content: NotificationContent,
+        trace: DecisionTrace, ingressMs: Long) {
+        val prefs = settings.preferences.value
+        if (!connected || !NotificationPolicy.shouldProcess(notification.packageName, packageName,
+                prefs.developerMode, prefs.mutedPackages)) return
+        if (notification.notification.extras.getBoolean("jev.recovered", false)) return
+        val key = notification.key
+        val body = content.body
+        val title = content.title
+        val smsPost = notification.packageName == Telephony.Sms.getDefaultSmsPackage(this)
+        // Always offer a new active candidate to the suppression bridge, including duplicates.
+        if (smsPost) SmsNotificationSuppressor.retryPending()
+        if (!connected || !generations.isCurrent(key, generation) || key in cancelledBySms ||
+            notification.packageName in settings.preferences.value.mutedPackages) return
+        if (smsPost) {
+            val candidate = smsCandidate(notification)
+            val admission = admitSmsPost(checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED,
+                candidate, markSeen = { recentPosts.markSeen(key, body, title, notification.postTime) },
+                owners = { dao.observeSmsOwners(candidate.body, System.currentTimeMillis() - 60_000L) })
+            if (admission == SmsPostAdmission.DUPLICATE) return
+            if (admission == SmsPostAdmission.OWNED) {
+                // SMS capture/Worker owns this message's decision, even while it is pending or allowed.
+                PerformanceMetrics.increment(PerformanceCounter.SMS_OWNED)
+                return
+            }
+            PerformanceMetrics.increment(PerformanceCounter.SMS_OWNER_FALLBACK)
+        } else if (!recentPosts.markSeen(key, body, title, notification.postTime)) return
+        if (!connected || !generations.isCurrent(key, generation) || key in cancelledBySms ||
+            notification.packageName in settings.preferences.value.mutedPackages) return
+        val (appLabel, channelLabel) = coroutineScope {
+            val app = async { labels.appLabel(notification.packageName) }
+            val channel = async { labels.channelLabel(notification.packageName, notification.uid, notification.notification.channelId) }
+            app.await() to channel.await()
+        }
+        val (event, entity) = withContext(Dispatchers.Default) {
+            val event = NotificationExtractor.extract(notification, appLabel, channelLabel,
+                "$key#${notification.postTime}#$generation", System.currentTimeMillis(), content).event
+            event to event.toEntity(appLabel, channelLabel, ingressElapsedMs = ingressMs, bootCount = bootCount)
+        }
+        if (!connected || !generations.isCurrent(key, generation)) return
+        trace.database { dao.insert(entity) }
+        retention.request()
+        val decision = withContext(Dispatchers.Default) { dispatcher.dispatch(event, EventLabels(appLabel, channelLabel), trace) }
+        // Check and cancel on one main-thread turn; an Android update cannot interleave.
+        if (decision.action != Action.ALLOW && connected && me.ethanxu.jevnoisegate.core.common.ServiceState.running &&
+            generations.isCurrent(key, generation) &&
+            notification.packageName !in settings.preferences.value.mutedPackages) {
+            cancelNotification(key)
+        }
+        trace.complete()
+    }
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        val key = sbn?.key ?: return
+        jobs.remove(key)?.cancel()
+        packages.remove(key)
+        generations.remove(key)
+        recentPosts.forget(key)
+        cancelledBySms.remove(key)
     }
 
     /**
@@ -186,23 +292,14 @@ class NoiseGateNotificationListener : NotificationListenerService() {
      * 还会再叠一层用户级开关。这个数字直接告诉我们处于哪种情况。
      */
     private fun logPackageVisibility() {
-        val count = labels.visibleAppCount()
-        AppLog.i(LogCategory.SYSTEM, TAG) { "包可见性: 可见 $count 个应用; 第三方样本=${labels.visibleAppSamples(5)}" }
-        if (count in 0..100) {
-            AppLog.w(LogCategory.SYSTEM, TAG) { "可见应用过少，第三方 App 名将解析失败 —— 需在系统设置里为本应用开启「获取应用列表」权限" }
+        scope.launch {
+            val count = labels.visibleAppCount()
+            AppLog.i(LogCategory.SYSTEM, TAG) { "包可见性: 可见 $count 个应用" }
+            if (count in 0..100) {
+                AppLog.w(LogCategory.SYSTEM, TAG) { "可见应用过少，第三方 App 名将解析失败 —— 需在系统设置里为本应用开启「获取应用列表」权限" }
+            }
         }
     }
 
-    private companion object {
-
-        /**
-         * 通知正文参与匹配的最短长度。
-         *
-         * 太短的正文（如"1"）会与大量通知误匹配，撤错别人的通知。
-         * 6 是个折中：能覆盖"您的验证码"这类短正文，又不至于匹配到单个字符。
-         */
-        const val MIN_MATCH_LENGTH = 6
-
-        const val TAG = "JevNoiseGate/Notif"
-    }
+    private companion object { const val TAG = "JevNoiseGate/Notif" }
 }

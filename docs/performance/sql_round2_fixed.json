@@ -1,0 +1,284 @@
+{
+  "scope": "Desktop SQLite in memory; actual schema 5/DAO SQL; 20 warm runs per query",
+  "sqlite": "3.53.1",
+  "samples": [
+    {
+      "rows": 1000,
+      "queries": {
+        "channelStats_10_buckets": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 74,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0072
+        },
+        "channelStats_one_bucket": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 79,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0073
+        },
+        "latencies_all_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 24039,
+          "result_rows": 1000,
+          "median_ms_20_runs": 1.0334
+        },
+        "latencies_100_old_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 2426,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.1058
+        },
+        "recent_1KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 8708,
+          "result_rows": 300,
+          "median_ms_20_runs": 2.3916
+        },
+        "recent_16KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 8708,
+          "result_rows": 300,
+          "median_ms_20_runs": 7.4366
+        },
+        "recent_summaries_16KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 9009,
+          "result_rows": 300,
+          "median_ms_20_runs": 2.6479
+        },
+        "latencies_zero_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 28,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.0031
+        },
+        "latencies_100_recent_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 2426,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.0984
+        },
+        "latencies_dense_mixed": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 26018,
+          "result_rows": 1000,
+          "median_ms_20_runs": 1.085
+        }
+      },
+      "recent_body_bytes_1KiB": 307200,
+      "summary_body_bytes": 0,
+      "recent_body_bytes_16KiB": 4915200
+    },
+    {
+      "rows": 10000,
+      "queries": {
+        "channelStats_10_buckets": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 74,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0084
+        },
+        "channelStats_one_bucket": {
+          "plan": [
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)",
+            "SCALAR SUBQUERY 3",
+            "SEARCH bucket_history USING INDEX sqlite_autoindex_bucket_history_1 (bucketKey=?)",
+            "SCALAR SUBQUERY 4",
+            "SEARCH observed_event USING INDEX sqlite_autoindex_observed_event_1 (id=?)"
+          ],
+          "vm_steps": 79,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0057
+        },
+        "latencies_all_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 24039,
+          "result_rows": 1000,
+          "median_ms_20_runs": 0.891
+        },
+        "latencies_100_old_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 2426,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.1079
+        },
+        "recent_1KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 8708,
+          "result_rows": 300,
+          "median_ms_20_runs": 2.5209
+        },
+        "recent_16KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 8708,
+          "result_rows": 300,
+          "median_ms_20_runs": 7.1529
+        },
+        "recent_summaries_16KiB": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 9009,
+          "result_rows": 300,
+          "median_ms_20_runs": 2.5635
+        },
+        "latencies_zero_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 28,
+          "result_rows": 0,
+          "median_ms_20_runs": 0.0029
+        },
+        "latencies_100_recent_model": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 2426,
+          "result_rows": 100,
+          "median_ms_20_runs": 0.108
+        },
+        "latencies_dense_mixed": {
+          "plan": [
+            "CO-ROUTINE (subquery-2)",
+            "MERGE (UNION ALL)",
+            "LEFT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "RIGHT",
+            "SEARCH observed_event USING COVERING INDEX index_observed_event_decidedBy_timestampMs_latencyMs (decidedBy=?)",
+            "SCAN (subquery-2)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 26026,
+          "result_rows": 1000,
+          "median_ms_20_runs": 1.0091
+        }
+      },
+      "recent_body_bytes_1KiB": 307200,
+      "summary_body_bytes": 0,
+      "recent_body_bytes_16KiB": 4915200
+    }
+  ]
+}

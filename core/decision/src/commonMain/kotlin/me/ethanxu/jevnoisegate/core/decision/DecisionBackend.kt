@@ -33,6 +33,9 @@ data class DecisionInput(
     val labels: EventLabels = EventLabels(),
     /** 用户写下的偏好规则。为空表示用户没配。 */
     val userRules: UserRules = UserRules.EMPTY,
+    val smsSenderBlacklist: List<String> = emptyList(),
+    /** A persisted user correction for this exact message fingerprint. */
+    val userAllowed: Boolean = false,
 )
 
 /**

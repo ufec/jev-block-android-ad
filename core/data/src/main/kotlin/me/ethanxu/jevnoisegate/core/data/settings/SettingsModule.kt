@@ -2,6 +2,8 @@ package me.ethanxu.jevnoisegate.core.data.settings
 
 import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,7 +17,10 @@ import javax.inject.Singleton
  * 必须是单例：同一个文件被两个 DataStore 实例同时打开会抛
  * `IllegalStateException: There are multiple DataStores active for the same file`。
  */
-private val Context.settingsDataStore by preferencesDataStore(name = "settings")
+private val Context.settingsDataStore by preferencesDataStore(
+    name = "settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 @Module
 @InstallIn(SingletonComponent::class)

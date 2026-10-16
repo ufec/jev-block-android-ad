@@ -9,12 +9,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 
 @HiltAndroidApp
-class JevNoiseGateApp : Application() {
+class JevNoiseGateApp : Application(), Configuration.Provider {
 
     @Inject
     lateinit var settings: SettingsRepository
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
 
     @Inject
     lateinit var localModel: LocalLayaBackend
@@ -22,18 +27,20 @@ class JevNoiseGateApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // 阻塞等待设置首次从磁盘加载完成。
-        //
-        // 日志等级必须在首条业务日志前加载。
-        //
-        // 代价是一次磁盘读取（实测 10~50ms），发生在冷启动、早于界面绘制。
-        settings.awaitReady()
-
-        // 日志落盘要在产生第一条日志之前就绪，否则启动早期的日志重启后会丢。
-        AppLog.init(this)
+        // 降噪开关的持久状态必须在任何通知到达前恢复，否则重启后
+        // 用户明明开着降噪，却要等下一次进设置页才会重新生效。
         me.ethanxu.jevnoisegate.core.common.ServiceState.enable(
             getSharedPreferences("service", 0).getBoolean("enabled", false),
         )
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { localModel.prepare() }
+
+        // 初始化日志时挂起等待设置，首帧与主线程无需等待磁盘读取。
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            settings.awaitReady()
+            AppLog.configure(settings.preferences.value.logLevel)
+            AppLog.init(this@JevNoiseGateApp)
+            // 模型校验要读 679 MB 并算 SHA-256，只能放在这里；
+            // 就绪前 ServiceState.running 恒为 false，不会放行任何消息。
+            localModel.prepare()
+        }
     }
 }

@@ -1,0 +1,165 @@
+{
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "scope": "Desktop SQLite in memory, warm synthetic 1 KiB bodies; no Room, Binder, disk, network or device measurements.",
+  "schema_version": 3,
+  "revision": "e55eb15",
+  "samples": [
+    {
+      "rows": 1000,
+      "allocated_bytes": 1458176,
+      "ingestion_median_ms_20_runs": 1.9444,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "vm_steps": 17022,
+          "result_rows": 0,
+          "median_ms_20_runs": 1.6011
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 3863,
+          "result_rows": 3,
+          "median_ms_20_runs": 0.2477
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 4013,
+          "result_rows": 100,
+          "median_ms_20_runs": 1.0231
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "vm_steps": 3262,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.2447
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 14423,
+          "result_rows": 10,
+          "median_ms_20_runs": 1.0753
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY"
+          ],
+          "vm_steps": 14047,
+          "result_rows": 2,
+          "median_ms_20_runs": 0.7987
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "vm_steps": 4012,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.2945
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "vm_steps": 1173,
+          "result_rows": 1,
+          "median_ms_20_runs": 0.0796
+        }
+      }
+    },
+    {
+      "rows": 10000,
+      "allocated_bytes": 14307328,
+      "ingestion_median_ms_20_runs": 81.8007,
+      "queries": {
+        "prune": {
+          "plan": [
+            "SCAN observed_event",
+            "LIST SUBQUERY 1",
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs",
+            "CREATE BLOOM FILTER"
+          ],
+          "vm_steps": 170021,
+          "result_rows": 0,
+          "median_ms_20_runs": 95.1722
+        },
+        "recentSuppressedSms": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 37163,
+          "result_rows": 3,
+          "median_ms_20_runs": 3.8172
+        },
+        "observeQuarantined": {
+          "plan": [
+            "SCAN observed_event USING INDEX index_observed_event_timestampMs"
+          ],
+          "vm_steps": 4013,
+          "result_rows": 100,
+          "median_ms_20_runs": 1.7048
+        },
+        "observeQuarantineCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "vm_steps": 32512,
+          "result_rows": 1,
+          "median_ms_20_runs": 7.9981
+        },
+        "observeTopChannels": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "vm_steps": 140423,
+          "result_rows": 10,
+          "median_ms_20_runs": 18.205
+        },
+        "observeActionCounts": {
+          "plan": [
+            "SCAN observed_event",
+            "USE TEMP B-TREE FOR GROUP BY"
+          ],
+          "vm_steps": 140047,
+          "result_rows": 2,
+          "median_ms_20_runs": 38.2412
+        },
+        "observeBackendAttemptCount": {
+          "plan": [
+            "SCAN observed_event"
+          ],
+          "vm_steps": 40012,
+          "result_rows": 1,
+          "median_ms_20_runs": 7.7231
+        },
+        "channelStats": {
+          "plan": [
+            "SEARCH observed_event USING INDEX index_observed_event_bucketKey (bucketKey=?)"
+          ],
+          "vm_steps": 11523,
+          "result_rows": 1,
+          "median_ms_20_runs": 1.2441
+        }
+      }
+    }
+  ]
+}

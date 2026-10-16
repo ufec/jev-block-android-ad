@@ -28,7 +28,7 @@ class LocalPipelineTest {
         assertEquals(Action.ALLOW, result.decision.action)
         assertEquals(DecidedBy.OTP_GATE, result.decision.decidedBy)
         assertTrue(backend.received.isEmpty())
-        assertFalse(result.uploaded)
+        assertFalse(result.backendAttempted)
     }
 
     @Test
@@ -36,10 +36,12 @@ class LocalPipelineTest {
         val message = input("限时优惠，全场五折")
         val classified = MessagePipeline(FakeBackend.alwaysDecide("广告")).process(message)
         assertEquals(Action.QUARANTINE, classified.decision.action)
-        assertFalse(classified.uploaded)
+        assertTrue(classified.backendAttempted)
         val failed = MessagePipeline(FakeBackend.alwaysFail()).process(message)
         assertEquals(Action.ALLOW, failed.decision.action)
         assertEquals(DecidedBy.FALLBACK, failed.decision.decidedBy)
-        assertFalse(failed.uploaded)
+        // 模型失败同样算"运行过模型"：它进了模型、拿到了失败结论，
+        // 与验证码、黑名单这类根本不进模型的路径必须区分开。
+        assertTrue(failed.backendAttempted)
     }
 }

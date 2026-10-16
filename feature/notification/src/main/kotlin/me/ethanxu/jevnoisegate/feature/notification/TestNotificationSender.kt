@@ -3,7 +3,6 @@ package me.ethanxu.jevnoisegate.feature.notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
@@ -76,9 +75,8 @@ object TestNotificationSender {
      * 与样张走的是**同一条链路**：同样带 `jev_selftest` 渠道、同样只在开发者模式下被记录，
      * 区别只是内容由调用方给。这样"自定义输入"验证的才不是一条被特殊对待的旁路。
      *
-     * @param title 可为空。它不进指纹、也不参与本地闸门，但会作为上下文随正文一起给模型，
-     *   所以想复现"同一条正文、不同标题"的误判时，这里就是那个变量。
-     * @param body 正文，本地闸门与指纹的唯一依据；空白时调用方不应发送。
+     * @param title 可为空，与正文一起参与验证码闸门和通知去重，并作为模型上下文。
+     * @param body 正文；空白时调用方不应发送。
      */
     fun send(context: Context, title: String, body: String) {
         lastCustomId?.let { previous ->
@@ -106,13 +104,14 @@ object TestNotificationSender {
 
         // 没有通知权限时静默失败 —— 用户会看到"没有通知出现"，
         // 好过抛异常让整个诊断页崩掉。
-        runCatching {
+        try {
             NotificationManagerCompat.from(context).notify(id, notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS can be revoked between the UI check and this call.
         }
     }
 
     private fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
 

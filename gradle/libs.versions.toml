@@ -23,8 +23,10 @@ litert = "2.2.0"
 
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
+robolectric = "4.17"
 
 [libraries]
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 # --- Compose ---
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }

@@ -21,17 +21,10 @@ object TextNormalizer {
     /** 占位符：一切数值（金额、日期、时间、纯数字串）。 */
     const val PLACEHOLDER_NUM = "N"
 
-    // 1) URL —— 必须最先执行
-    private val URL_PATTERN = Regex(
-        pattern = """(?:https?://|www\.)\S+""" +
-            """|[\w.-]+\.(?:com|cn|net|org|io|xyz|top|info|cc|vip|shop|live|club|site|online)(?:/\S*)?""",
-        option = RegexOption.IGNORE_CASE,
-    )
-
     // 2) 金额 —— 需在裸数字之前处理，否则「￥199」会先被切成「￥N」
     private val AMOUNT_PATTERN = Regex(
         """[¥￥$]\s*\d+(?:[.,]\d+)?""" +
-            """|\d+(?:[.,]\d+)?\s*(?:元|万元|万|亿|块|折)""",
+            """|(?<!\d)\d+(?:[.,]\d+)?\s*(?:元|万元|万|亿|块|折)""",
     )
 
     // 3) 日期与时间
@@ -59,7 +52,7 @@ object TextNormalizer {
     fun normalize(body: String): String {
         var text = body
 
-        text = URL_PATTERN.replace(text, PLACEHOLDER_URL)
+        text = UrlNormalizer.replace(text)
         text = AMOUNT_PATTERN.replace(text, PLACEHOLDER_NUM)
         text = DATE_TIME_PATTERN.replace(text, PLACEHOLDER_NUM)
         text = DIGITS_PATTERN.replace(text, PLACEHOLDER_NUM)

@@ -13,8 +13,8 @@ android {
         applicationId = "me.ethanxu.jevnoisegate"
         minSdk = 29
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
 
         ndk {
             abiFilters += providers.gradleProperty("targetAbi").orNull
@@ -26,6 +26,8 @@ android {
         compose = true
         buildConfig = true
     }
+    lint { checkDependencies = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     androidResources {
         noCompress += listOf("tflite", "bin")
@@ -51,6 +53,10 @@ android {
             )
         }
     }
+}
+
+tasks.register("resolveReleaseDependencies") {
+    doLast { configurations.getByName("releaseRuntimeClasspath").resolve() }
 }
 
 kotlin {
@@ -93,10 +99,13 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.hilt.android)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
     ksp(libs.hilt.compiler)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
 }

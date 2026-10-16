@@ -1,20 +1,33 @@
 package me.ethanxu.jevnoisegate.core.pipeline
 
 import me.ethanxu.jevnoisegate.core.common.Clock
-import me.ethanxu.jevnoisegate.core.common.SystemClock
+import me.ethanxu.jevnoisegate.core.common.MonotonicClock
+import me.ethanxu.jevnoisegate.core.common.PerformanceMetrics
+import me.ethanxu.jevnoisegate.core.common.PerformanceCounter
 import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.DecisionInput
 import me.ethanxu.jevnoisegate.core.decision.DecisionMapper
 import me.ethanxu.jevnoisegate.core.model.Action
 import me.ethanxu.jevnoisegate.core.model.DecidedBy
 import me.ethanxu.jevnoisegate.core.model.FinalDecision
+import me.ethanxu.jevnoisegate.core.model.EventSource
+import me.ethanxu.jevnoisegate.core.model.FailureReason
+import me.ethanxu.jevnoisegate.core.decision.SmsBlacklist
+import me.ethanxu.jevnoisegate.core.decision.BackendOutcome
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 一次判断的结果。`uploaded` 保留为历史数据库列的兼容值，本地版本恒为 false。
+ * 一次判断的结果，连同是否运行过模型。
+ * [backendAttempted] 不代表模型给出了结论；本地放行、黑名单与用户纠错路径恒为 false。
  */
 data class PipelineResult(
     val decision: FinalDecision,
-    val uploaded: Boolean,
+    val backendAttempted: Boolean,
+    val queueMs: Long = 0,
+    val backendMs: Long = 0,
 )
 
 /**
@@ -29,31 +42,68 @@ data class PipelineResult(
  */
 class MessagePipeline(
     private val backend: DecisionBackend,
-    private val clock: Clock = SystemClock,
+    private val clock: Clock = MonotonicClock,
+    private val deadlineMs: Long = 15_000L,
+    maxConcurrentRequests: Int = 4,
 ) {
+    private val requests = Semaphore(maxConcurrentRequests)
+
+    /** Local policy is shared by SMS broadcasts, workers and notifications. */
+    fun localDecision(input: DecisionInput): PipelineResult? {
+        val by = when {
+            OtpGate.isOtpLike(input.event.body, input.event.title) -> DecidedBy.OTP_GATE
+            input.userAllowed -> DecidedBy.USER
+            input.event.source == EventSource.SMS &&
+                SmsBlacklist.matches(input.event.senderKey, input.smsSenderBlacklist) -> DecidedBy.BLACKLIST
+            else -> return null
+        }
+        return PipelineResult(
+            FinalDecision(input.event, if (by == DecidedBy.BLACKLIST) Action.SILENT_SUPPRESS else Action.ALLOW, by),
+            backendAttempted = false,
+        )
+    }
 
     suspend fun process(input: DecisionInput): PipelineResult {
-        // ① OTP 闸门 —— 命中即放行，且不运行模型。
-        if (OtpGate.isOtpLike(input.event.body)) {
-            return PipelineResult(
-                decision = FinalDecision(
-                    event = input.event,
-                    action = Action.ALLOW,
-                    decidedBy = DecidedBy.OTP_GATE,
-                ),
-                uploaded = false,
-            )
-        }
+        // ① 本机判定 —— 验证码、号码黑名单与用户纠错命中即返回，不运行模型。
+        localDecision(input)?.let { return it }
 
         // ② 交给本地模型。只在这一段计时。
         val startedAt = clock.nowMillis()
-        val outcome = backend.decide(input)
-        val elapsed = clock.nowMillis() - startedAt
+        var attempted = false
+        var queueMs = 0L
+        var backendMs = 0L
+        PerformanceMetrics.queued()
+        val outcome = try { withTimeoutOrNull(deadlineMs) {
+            requests.withPermit {
+                attempted = true
+                queueMs = (clock.nowMillis() - startedAt).coerceAtLeast(0)
+                val backendStarted = clock.nowMillis()
+                PerformanceMetrics.acquired()
+                try {
+                    backend.decide(input)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    BackendOutcome.Failed(FailureReason.MODEL_ERROR, error.message)
+                } finally {
+                    backendMs = (clock.nowMillis() - backendStarted).coerceAtLeast(0)
+                    PerformanceMetrics.finished()
+                }
+            }
+        } ?: BackendOutcome.Failed(FailureReason.MODEL_UNAVAILABLE)
+        } finally { if (!attempted) PerformanceMetrics.dequeued() }
+        val elapsed = (clock.nowMillis() - startedAt).coerceAtLeast(0)
+        if (!attempted) queueMs = elapsed
+        if (outcome is BackendOutcome.Failed && outcome.reason == FailureReason.MODEL_UNAVAILABLE) {
+            PerformanceMetrics.increment(if (attempted) PerformanceCounter.BACKEND_TIMEOUT else PerformanceCounter.QUEUE_TIMEOUT)
+        }
 
         // ③ 映射为动作。fail-open 在这里落地，所有不确定路径一律放行。
         return PipelineResult(
             decision = DecisionMapper.map(input, outcome, elapsed),
-            uploaded = false,
+            backendAttempted = attempted,
+            queueMs = queueMs,
+            backendMs = backendMs,
         )
     }
 }

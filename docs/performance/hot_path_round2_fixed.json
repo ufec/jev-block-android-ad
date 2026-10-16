@@ -1,0 +1,79 @@
+{
+  "scope": "Actual Kotlin methods on desktop JVM; excludes Binder, Android scheduling and disk",
+  "java": "17.0.20.1",
+  "normalizer": [
+    {
+      "chars": 1024,
+      "median_ms": 0.5294,
+      "url_stage_median_ms": 0.1428,
+      "result_chars": 40
+    },
+    {
+      "chars": 4096,
+      "median_ms": 2.4249,
+      "url_stage_median_ms": 0.2425,
+      "result_chars": 40
+    },
+    {
+      "chars": 8192,
+      "median_ms": 3.2418,
+      "url_stage_median_ms": 0.2754,
+      "result_chars": 40
+    },
+    {
+      "chars": 16384,
+      "median_ms": 6.9995,
+      "url_stage_median_ms": 0.8822,
+      "result_chars": 40
+    }
+  ],
+  "controls": {
+    "cjk_16384_median_ms": 6.5255,
+    "short_ascii_tokens_16384_median_ms": 6.7847,
+    "note": "Nullable lookup cache behavior is covered by AsyncLookupCacheTest"
+  },
+  "sms_batch": [
+    {
+      "pending": 1,
+      "active": 1,
+      "shared_prefix_chars": 1024,
+      "cartesian_pairs_avoided": 1,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 0.0192,
+      "fresh_text_with_copy_median_ms": 0.1077
+    },
+    {
+      "pending": 128,
+      "active": 32,
+      "shared_prefix_chars": 1024,
+      "cartesian_pairs_avoided": 4096,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 0.419,
+      "fresh_text_with_copy_median_ms": 0.6033
+    },
+    {
+      "pending": 128,
+      "active": 128,
+      "shared_prefix_chars": 1024,
+      "cartesian_pairs_avoided": 16384,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 0.1187,
+      "fresh_text_with_copy_median_ms": 0.6415
+    },
+    {
+      "pending": 128,
+      "active": 128,
+      "shared_prefix_chars": 16384,
+      "cartesian_pairs_avoided": 16384,
+      "snapshot_loads_per_round": 1.0,
+      "median_ms": 0.0856,
+      "fresh_text_with_copy_median_ms": 5.8222
+    }
+  ],
+  "source_sha256": {
+    "feature/notification/src/main/kotlin/me/ethanxu/jevnoisegate/feature/notification/SmsNotificationMatcher.kt": "5A37D576D4D5ABF3EE06B35913C96BF70BF8B86836BEB45B54A7B13C5085891E",
+    "core/fingerprint/src/commonMain/kotlin/me/ethanxu/jevnoisegate/core/fingerprint/TextNormalizer.kt": "C37CF4CD2FB5CFDB9C12C5141AE2142801A8C15386B426946D295CB7BC20C433",
+    "feature/notification/src/main/kotlin/me/ethanxu/jevnoisegate/feature/notification/SmsBatchMatcher.kt": "59041E38E68AE1259F0F12C14BDEEC243267C5F3F34BD829B0BEDB870F321F02",
+    "core/fingerprint/src/commonMain/kotlin/me/ethanxu/jevnoisegate/core/fingerprint/UrlNormalizer.kt": "58D03ADF7B9263FD670F972F928FD58A72F38A514F9D475547251B6C2B0AF8F1"
+  }
+}
