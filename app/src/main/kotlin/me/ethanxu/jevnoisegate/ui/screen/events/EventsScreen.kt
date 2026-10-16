@@ -92,6 +92,19 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
         ActivityResultContracts.RequestPermission(),
     ) { granted -> smsGranted = granted }
 
+    val downloadPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!granted) android.widget.Toast.makeText(context, "通知权限未开启，下载进度仅在应用内显示", android.widget.Toast.LENGTH_LONG).show()
+        viewModel.downloadModel()
+    }
+    val startDownload = {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            downloadPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else viewModel.downloadModel()
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -115,7 +128,7 @@ fun EventsScreen(viewModel: MainViewModel = viewModel()) {
                     })
                     Text("首次下载约 679 MB；消息分类在本机完成。", style = MaterialTheme.typography.bodySmall)
                     if (!model.ready) {
-                        OutlinedButton(onClick = viewModel::downloadModel, enabled = !model.busy) { Text("下载 / 继续下载模型") }
+                        OutlinedButton(onClick = startDownload, enabled = !model.busy) { Text("下载 / 继续下载模型") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = viewModel::toggleService, enabled = enabled || !model.busy) {

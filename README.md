@@ -1,6 +1,6 @@
 # JevNoiseGate
 
-Android 短信与通知降噪应用。消息在设备上由 Laya Multilingual LiteRT 模型分类，再按用户设置的动作与置信度门槛处理。联网仅用于下载模型，不使用 API Key、代理或云端判断，不上传短信或通知内容。
+Android 短信与通知降噪应用。消息在设备上由 Laya Multilingual LiteRT 模型分类，再按用户设置的动作与置信度门槛处理。联网仅用于下载模型，不使用 API Key 或云端判断，不上传短信或通知内容。下载支持系统网络、直连和手动代理。
 
 ## 运行方式
 
@@ -11,6 +11,8 @@ Android 短信与通知降噪应用。消息在设备上由 Laya Multilingual Li
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
+`-PtargetAbi=arm64-v8a` 只打包单个 ABI，用于缩短本机安装调试的构建时间；省略时仍打包 `arm64-v8a` 和 `x86_64`。
+
 首次使用：
 
 1. 在事件页点击「下载 / 继续下载模型」。下载约 679 MB 到应用私有目录，显示进度；网络失败后可重试并续传。
@@ -18,7 +20,9 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 3. 点击「开启降噪」。每次开启前校验全部模型的大小和 SHA-256，确认模型初始化成功、通知使用权存在且监听服务实际连接。
 4. 点击「停止降噪」可立即停止通知及短信采集、拦截。系统监听服务仍由 Android 管理；页面区分系统连接状态和降噪运行状态。
 
-下载使用 Hugging Face HTTPS 地址，固定仓库 revision `058cbf34ed2c6a2854ec60e9534c229d08740387`，并校验固定 SHA-256。只有校验成功的完整文件才安装，未完成文件以 `.part` 保存。服务器不支持 Range 时重新下载当前文件。下载任务随应用进程存活；进程终止后重新打开应用、点击继续下载即可恢复。首次下载需能访问 Hugging Face，失败原因会显示在页面。
+下载使用 Hugging Face HTTPS 地址，固定仓库 revision `058cbf34ed2c6a2854ec60e9534c229d08740387`，并校验固定 SHA-256。只有校验成功的完整文件才安装，未完成文件以 `.part` 保存。服务器不支持 Range 时重新下载当前文件。下载由 dataSync 前台服务执行，切换页面或退到后台继续下载，通知栏显示进度并提供暂停按钮。需允许通知权限才能在通知栏展示；拒绝后仍可在应用内看进度。系统回收服务后支持重投下载任务并续传，强行停止或重启手机后需手动继续。Android 的后台时间限制仍适用。首次下载需能访问 Hugging Face，失败原因会显示在页面和通知中。
+
+「设置 → 网络代理」独立页面提供跟随系统 / VPN、直连、HTTP 和 SOCKS5（无认证）代理配置。当前应用联网仅用于模型下载，保存后在下次下载或继续下载时生效。电脑代理需允许局域网访问，填写电脑局域网 IP 和端口，不能填代表手机自身的 127.0.0.1。HTTP 代理通过 CONNECT 隧道下载 HTTPS 模型，模型校验不变。
 
 开启状态保存在本机。重启后重新校验模型、初始化，只有系统监听重新连接后才恢复处理；模型缺失、损坏或监听断开时暂停，不拦截消息。新安装默认关闭。读取短信为可选权限，仍需用户授权。分类在下载完成后可以离线运行，当前构建包含 `arm64-v8a` 和 `x86_64` 原生库。
 
@@ -48,3 +52,9 @@ Android 推理代码与模型来自 [Laya Multilingual LiteRT](https://huggingfa
 - 8 项新增测试通过，覆盖完整下载、Range 续传、忽略 Range 时重下、损坏文件拒绝安装、有效文件跳过网络，以及服务启用和运行条件。
 - 模拟器上通过暂时移走模型文件、撤销通知使用权验证开启被拒绝；恢复模型及授权后开启成功，广告测试通知返回「广告」97.39% 并撤销。停止后测试通知保留。
 - 当前电脑连接 Hugging Face 超时，因此未声称完整公网下载已经跑通。下载任务没有前台服务保活；应用进程被系统终止后需回到页面继续下载。
+
+## 前台下载与代理改动验证（2026-10-16）
+
+- Debug 构建成功，10 项测试通过（`ModelDownloadTest` 6、`ServiceStateTest` 3、`DownloadProxyTest` 1）。新增覆盖：取消后保留 `.part` 供续传、HTTP 代理发出绝对 URI 请求且不解析源站。
+- APK 清单已确认包含 `ModelDownloadService`（`foregroundServiceType` 为 `dataSync`）以及 `FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`、`WAKE_LOCK`、`POST_NOTIFICATIONS` 权限。
+- 前台保活、通知栏进度、暂停续传和代理下载未在真机或模拟器上跑过，本机只有构建和单元测试证据；当前电脑连接 Hugging Face 超时，公网下载仍未验证。

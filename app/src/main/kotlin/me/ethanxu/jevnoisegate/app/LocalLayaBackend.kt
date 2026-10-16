@@ -12,7 +12,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import me.ethanxu.jevnoisegate.core.decision.BackendOutcome
 import me.ethanxu.jevnoisegate.core.decision.DecisionBackend
 import me.ethanxu.jevnoisegate.core.decision.DecisionInput
@@ -32,21 +33,43 @@ class LocalLayaBackend @Inject constructor(
     private val mutableStatus = MutableStateFlow(LocalModelStatus())
     val status = mutableStatus.asStateFlow()
     private val operation = kotlinx.coroutines.sync.Mutex()
-    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    @Volatile private var downloadConnection: java.net.HttpURLConnection? = null
 
+    fun interruptDownload() { downloadConnection?.disconnect() }
     fun download() {
-        scope.launch {
-            if (!operation.tryLock()) return@launch
+        androidx.core.content.ContextCompat.startForegroundService(context,
+            android.content.Intent(context, ModelDownloadService::class.java))
+    }
+
+    suspend fun downloadInService(onStatus: (LocalModelStatus) -> Unit) = withContext(Dispatchers.IO) {
+            operation.lock()
             try {
                 mutableStatus.value = LocalModelStatus("正在下载模型（约 679 MB）…", busy = true)
-                ModelAssets.download(context) { progress ->
+                onStatus(mutableStatus.value)
+                val job = coroutineContext[kotlinx.coroutines.Job]!!
+                val proxy = DownloadProxySettings.load(context).toProxy()
+                ModelAssets.download(context.filesDir, ModelAssets.assets, connect = { url ->
+                    ((if (proxy == null) java.net.URL(url).openConnection()
+                    else java.net.URL(url).openConnection(proxy)) as java.net.HttpURLConnection)
+                        .also { downloadConnection = it }
+                }) { progress ->
+                    job.ensureActive()
                     mutableStatus.value = LocalModelStatus("正在下载模型 · ${(progress * 100).toInt()}%", busy = true, progress = progress)
+                    onStatus(mutableStatus.value)
                 }
                 synchronized(lock) { readyEngine() }
+            } catch (cancelled: CancellationException) {
+                mutableStatus.value = LocalModelStatus("下载已暂停，可继续下载", progress = mutableStatus.value.progress)
+                throw cancelled
             } catch (failure: Exception) {
-                mutableStatus.value = LocalModelStatus("下载或校验失败，请重试：${failure.message}")
-            } finally { operation.unlock() }
-        }
+                mutableStatus.value = if (!coroutineContext.isActive)
+                    LocalModelStatus("下载已暂停，可继续下载", progress = mutableStatus.value.progress)
+                else LocalModelStatus("下载或校验失败，请重试：${failure.message}")
+            } finally {
+                downloadConnection = null
+                operation.unlock()
+                onStatus(mutableStatus.value)
+            }
     }
 
     suspend fun prepare() = withContext(Dispatchers.IO) {
@@ -137,7 +160,7 @@ class LocalLayaBackend @Inject constructor(
 /** Downloads pinned files; checks every byte before installing. */
 internal object ModelAssets {
     internal data class Asset(val name: String, val size: Long, val sha256: String)
-    private val assets = listOf(
+    internal val assets = listOf(
         Asset("laya_ml_s256_embeds_wfp16.tflite", 250889408, "f55216170734e38eb287f46de4f11cb1863afba30c09f586650f1ce7b03de81e"),
         Asset("laya_ml_act_head_fp32.tflite", 795816, "30da532a8b752fdc82351740b0194d440a13d342ed77b9f8848978f1a96cf16d"),
         Asset("laya_ml_calibration.json", 9156, "80e148c68154b607e7bb66446f064b1fe5da649e1074c917b25e02551a566f2c"),
@@ -163,8 +186,6 @@ internal object ModelAssets {
     }
 
     fun verify(context: Context): Boolean = assets.all { valid(File(context.filesDir, it.name), it) }
-
-    fun download(context: Context, progress: (Float) -> Unit) = download(context.filesDir, assets, progress = progress)
 
     internal fun download(
         directory: File,

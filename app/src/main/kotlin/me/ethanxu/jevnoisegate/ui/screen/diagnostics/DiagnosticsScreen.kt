@@ -296,7 +296,7 @@ private fun LocalModelCard(status: String) {    Card(modifier = Modifier.fillMax
             Text(status, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "短信和通知在本机完成分类。模型文件随应用安装，应用没有网络权限。" +
+                "短信和通知在本机完成分类。模型需首次在线下载，联网仅用于下载模型。" +
                     "验证码仍由本地闸门优先放行。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -16,7 +16,10 @@ android {
         versionCode = 2
         versionName = "0.1.1"
 
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        ndk {
+            abiFilters += providers.gradleProperty("targetAbi").orNull
+                ?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildFeatures {
@@ -26,7 +29,7 @@ android {
 
     androidResources {
         noCompress += listOf("tflite", "bin")
-        // Models remain in the repository for offline verification, but never enter the APK.
+        // Optional local verification models never enter the APK.
         ignoreAssetsPattern = "laya"
     }
 

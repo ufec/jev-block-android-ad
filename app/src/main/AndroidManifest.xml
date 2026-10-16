@@ -8,8 +8,8 @@
       1. 包可见性。QUERY_ALL_PACKAGES 是 Android 11+ 的包可见性限制：
          不声明的话 PackageManager 查不到其他 App，就解析不出 App 显示名，
          界面上只能退化显示包名。
-      2. 自身通知 —— Android 13+ 起发通知需要运行时授权。当前观察期还没发通知，
-         但回收站提醒会用到，提前声明避免以后忘了。
+      2. 自身通知 —— Android 13+ 起发通知需要运行时授权。下载前台服务用它展示
+         进度和暂停按钮；拒绝授权不影响下载，只是进度只在应用内显示。
 
       短信相关权限（READ_SMS / RECEIVE_SMS）由 :feature:sms 的清单声明，
       通知监听服务由 :feature:notification 的清单声明 —— 各自靠近使用它们的代码，
@@ -17,6 +17,9 @@
     -->
     <!-- Network access is used only to fetch pinned model files. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission
@@ -31,6 +34,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.JevNoiseGate">
+
+        <service android:name=".ModelDownloadService" android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <activity
             android:name=".MainActivity"

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import me.ethanxu.jevnoisegate.app.DownloadProxySettings
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +31,7 @@ import me.ethanxu.jevnoisegate.ui.theme.ColorMode
 fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     val navigator = LocalNavigator.current
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val proxy = DownloadProxySettings.load(LocalContext.current)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -47,6 +50,18 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             }
         }
 
+        item {
+            SegmentedColumn(title = "网络") {
+                item {
+                    SegmentedArrowItem(title = "网络代理", summary = when (proxy.type) {
+                        "HTTP" -> "HTTP · ${proxy.host}:${proxy.port}"
+                        "SOCKS" -> "SOCKS5 · ${proxy.host}:${proxy.port}"
+                        "DIRECT" -> "直连"
+                        else -> "跟随系统 / VPN"
+                    }, onClick = { navigator.push(Route.NetworkProxy) })
+                }
+            }
+        }
         item {
             SegmentedColumn(title = "判断") {
                 item {

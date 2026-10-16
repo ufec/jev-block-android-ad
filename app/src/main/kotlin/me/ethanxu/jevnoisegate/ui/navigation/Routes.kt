@@ -26,6 +26,10 @@ sealed interface Route : NavKey {
         override val id = "settings/theme"
     }
 
+    data object NetworkProxy : Route {
+        override val id = "settings/network-proxy"
+    }
+
     /** 用户偏好规则。作为软约束随 state 交给模型。 */
     data object UserRules : Route {
         override val id = "settings/user-rules"
@@ -48,7 +52,7 @@ sealed interface Route : NavKey {
     companion object {
         val all: List<Route> =
             listOf(
-                Main, ThemeSettings,
+                Main, ThemeSettings, NetworkProxy,
                 UserRules, SmsBlacklist, AppFilterSettings, Logs,
             )
 

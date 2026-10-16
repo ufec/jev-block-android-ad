@@ -39,6 +39,7 @@ import me.ethanxu.jevnoisegate.ui.screen.settings.AppFilterSettingsScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.SmsBlacklistScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.UserRulesScreen
 import me.ethanxu.jevnoisegate.ui.screen.settings.ThemeSettingsScreen
+import me.ethanxu.jevnoisegate.ui.screen.settings.NetworkProxyScreen
 import me.ethanxu.jevnoisegate.ui.theme.AppSettings
 import me.ethanxu.jevnoisegate.ui.theme.ColorMode
 import me.ethanxu.jevnoisegate.ui.theme.JevNoiseGateTheme
@@ -122,6 +123,12 @@ private fun AppNavHost(navigator: Navigator) {
                 Route.UserRules -> NavEntry(key) {
                     // UserRulesScreen 自带 SubPageScaffold。
                     UserRulesScreen()
+                }
+
+                Route.NetworkProxy -> NavEntry(key) {
+                    SubPageScaffold(title = "网络代理", onBack = { navigator.pop() }) { padding ->
+                        Box(Modifier.padding(padding)) { NetworkProxyScreen() }
+                    }
                 }
 
                 Route.SmsBlacklist -> NavEntry(key) {

@@ -10,6 +10,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelDownloadTest {
+    @Test fun interruptedTransferRetainsPartialFileForResume() = inDirectory { dir ->
+        try {
+            ModelAssets.download(dir, listOf(asset), { response(bytes) }) {
+                throw kotlinx.coroutines.CancellationException("pause")
+            }
+            fail("Transfer should stop")
+        } catch (_: kotlinx.coroutines.CancellationException) { }
+        assertFalse(File(dir, asset.name).exists())
+        assertArrayEquals(bytes, File(dir, "${asset.name}.part").readBytes())
+        ModelAssets.download(dir, listOf(asset), { error("Complete partial file should not redownload") }) { }
+        assertTrue(ModelAssets.valid(File(dir, asset.name), asset))
+    }
+
     private val bytes = "model-test-content".toByteArray()
     private val asset = ModelAssets.Asset("model.bin", bytes.size.toLong(),
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) })
